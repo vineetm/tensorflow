@@ -4,35 +4,16 @@ from __future__ import print_function
 import tensorflow as tf, sys
 import numpy as np
 import time, os
-from ptb_word_lm import PTBModel
+from ptb_word_lm import PTBModel, LargeConfig
 
 import cPickle as pkl
 
 flags = tf.flags
-#flags.DEFINE_string("data_path", None, "data_path")
-#flags.DEFINE_string("model_path", None, "model_path")
 flags.DEFINE_string("probe_word", None, "probe_word")
 FLAGS = flags.FLAGS
 
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
-
-class SmallConfig(object):
-  """Small config."""
-  init_scale = 0.1
-  learning_rate = 1.0
-  max_grad_norm = 5
-  num_layers = 2
-  num_steps = 1
-  hidden_size = 200
-  max_epoch = 4
-  max_max_epoch = 13
-  keep_prob = 1.0
-  lr_decay = 0.5
-  batch_size = 1
-  vocab_size = 10000
-  max_len = 50
-
 
 class SentenceGenerator(object):
 
@@ -50,13 +31,16 @@ class SentenceGenerator(object):
     logging.info('Vocab Size: %d' % len(self.word_to_id))
 
     self.model_path = model_path
-    self.config = SmallConfig
+    self.config = LargeConfig
+    self.config.batch_size = 1
+    self.config.num_steps = 1
+    self.config.max_len = 50
     initializer = tf.random_uniform_initializer(-self.config.init_scale,
                                                 self.config.init_scale)
 
     # Define Decoder Model
     with tf.variable_scope("model", reuse=None, initializer=initializer):
-      self.model = PTBModel(is_training=True, config=self.config, is_decoder=True)
+      self.model = PTBModel(is_training=False, config=self.config, is_decoder=True)
 
   def sample(self, a, temperature=1.0):
     probs = a[0]
@@ -93,7 +77,7 @@ class SentenceGenerator(object):
       probs, state = session.run(fetches, feed_dict)
       new_token_id = self.sample(probs)
 
-      if new_token_id == 2:
+      if self.id_to_word[new_token_id] == '<eos>':
         return self.get_sentence(sentence_tokens)
 
       sentence_tokens.append(new_token_id)
@@ -114,7 +98,14 @@ class SentenceGenerator(object):
     start_token_id = word_id
     sentences = []
     set_sentences = set()
-    with tf.Session() as session:
+
+    cf = tf.ConfigProto()
+    cf.gpu_options.allocator_type = 'BFC'
+    cf.log_device_placement=True
+    cf.gpu_options.allow_growth = True
+
+
+    with tf.Session(config = cf) as session:
       saver = tf.train.Saver()
       saver.restore(session, self.model_path)
 
