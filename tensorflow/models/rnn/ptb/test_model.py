@@ -5,6 +5,8 @@ import tensorflow as tf, sys
 import numpy as np
 import time, os
 from ptb_word_lm import PTBModel, LargeConfig
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize as tokenizer
 
 import cPickle as pkl
 
@@ -14,6 +16,8 @@ FLAGS = flags.FLAGS
 
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
+
+STOPW = stopwords.words('english')
 
 class SentenceGenerator(object):
 
@@ -30,6 +34,9 @@ class SentenceGenerator(object):
     self.generate_id_to_word()
     logging.info('Vocab Size: %d' % len(self.word_to_id))
 
+    self.stopw = [word for word in STOPW if word in self.word_to_id]
+    logging.info('Num stopwords found:%d'% len(self.stopw))
+
     self.model_path = model_path
     self.config = LargeConfig
     self.config.batch_size = 1
@@ -42,8 +49,35 @@ class SentenceGenerator(object):
     with tf.variable_scope("model", reuse=None, initializer=initializer):
       self.model = PTBModel(is_training=False, config=self.config, is_decoder=True)
 
-  def sample(self, a, temperature=1.0):
-    probs = a[0]
+
+  def sample(self, probs, keywords):
+    if keywords is None:
+      return self.generate_sample(probs)
+
+    #Candidate keywords + EOS
+    probs_keywords = np.zeros(len(keywords) + 1)
+    keywords_list = list(keywords)
+    eos_index = len(keywords_list)
+
+    for index, keyword in enumerate(keywords_list):
+      probs_keywords[index] = probs[keyword]
+    probs_keywords[eos_index] = probs[self.word_to_id['<eos>']]
+
+    sample_id = self.generate_sample(probs_keywords)
+    if sample_id == eos_index:
+      return self.word_to_id['<eos>']
+    else:
+      return keywords_list[sample_id]
+
+
+  def generate_samples_multiple(self, partial_probs):
+    sum_probs = np.sum(partial_probs)
+    scale = 1.0 / sum_probs
+    probs = partial_probs * scale
+
+  def generate_sample(self, a, temperature=1.0):
+
+    probs = a
 
     # helper function to sample an index from a probability array
     probs = np.log(probs) / temperature
@@ -62,7 +96,44 @@ class SentenceGenerator(object):
     return ' '.join([self.id_to_word[token_id] for token_id in token_ids])
 
 
-  def generate_sentence(self, start_token_id, session):
+  def compute_prob(self, sentence):
+    # Lower case, tokenize, generate token #s
+    sentence = sentence.lower()
+    tokens = tokenizer(sentence)
+    token_ids = [self.word_to_id[token] if token in self.word_to_id
+                 else self.word_to_id['<unk>']
+                 for token in tokens]
+
+    with tf.Session() as session:
+      saver = tf.train.Saver()
+      saver.restore(session, self.model_path)
+
+      #Get initial LSTM state
+      state = session.run(self.model.initial_state)
+
+      sentence_prob = 1.0
+      for index, token_id in enumerate(token_ids):
+        if index == len(token_ids) - 1:
+          return sentence_prob
+
+        fetches = [self.model.probs, self.model.final_state]
+
+        feed_dict = {}
+        x = np.array([[token_id]])
+        feed_dict[self.model.input_data] = x
+        feed_dict[self.model.initial_state] = state
+
+        probs, state = session.run(fetches, feed_dict)
+        sentence_prob *= probs[0][token_ids[index + 1]]
+
+
+  def generate_sentence(self, start_token_id, session, keywords=None):
+    curr_keywords = None
+    if keywords is not None:
+      curr_keywords = set()
+      for keyword in keywords:
+        curr_keywords.add(keyword)
+
     sentence_tokens = []
     sentence_tokens.append(start_token_id)
     state = session.run(self.model.initial_state)
@@ -75,7 +146,17 @@ class SentenceGenerator(object):
       feed_dict[self.model.initial_state] = state
 
       probs, state = session.run(fetches, feed_dict)
-      new_token_id = self.sample(probs)
+      new_token_id = self.sample(probs[0], curr_keywords)
+
+      #Keep on sampling till you get a word in desired set
+      if curr_keywords is not None:
+        if self.id_to_word[new_token_id] == '<eos>':
+          return self.get_sentence(sentence_tokens)
+
+        curr_keywords.remove(new_token_id)
+        if len(curr_keywords) == 0:
+          return self.get_sentence(sentence_tokens)
+
 
       if self.id_to_word[new_token_id] == '<eos>':
         return self.get_sentence(sentence_tokens)
@@ -89,31 +170,58 @@ class SentenceGenerator(object):
 
     return self.get_sentence(sentence_tokens)
 
-  def generate_sentences(self, probe_word, num_sentences=10):
+  def generate_sentences(self, probe_word, keywords_text=None, num_sentences=10):
+    generated_sentences = 0
+
+    if keywords_text is not None:
+      keywords = keywords_text.lower()
+      keywords = tokenizer(keywords)
+
+      keywords = [self.word_to_id[word] if word in self.word_to_id else self.word_to_id['<unk>'] for word in keywords]
+      keywords = set(keywords)
+
+      keywords_vocab = [self.id_to_word[keyword] for keyword in keywords]
+      logging.info('Keywords in vocab: %s'% ' '.join(keywords_vocab))
+
+      if self.word_to_id[probe_word] in keywords:
+        keywords.remove(self.word_to_id[probe_word])
+      #stopw = [self.word_to_id[word] for word in STOPW if word in self.word_to_id]
+      #keywords = set(keywords) | set(stopw)
+
     if probe_word not in self.word_to_id:
       word_id = self.word_to_id['<unk>']
     else:
       word_id = self.word_to_id[probe_word]
 
+    logging.info('')
     start_token_id = word_id
     sentences = []
     set_sentences = set()
 
     cf = tf.ConfigProto()
     cf.gpu_options.allocator_type = 'BFC'
-    cf.log_device_placement=True
+    #cf.log_device_placement=True
     cf.gpu_options.allow_growth = True
-
 
     with tf.Session(config = cf) as session:
       saver = tf.train.Saver()
       saver.restore(session, self.model_path)
 
+      num_repetitions = 0
       while len(sentences) < num_sentences:
-        sentence = self.generate_sentence(start_token_id, session)
+        #Restore Original Keywords
+        sentence = self.generate_sentence(start_token_id, session, keywords=keywords)
         if sentence not in set_sentences:
           sentences.append(sentence)
           set_sentences.add(sentence)
+          logging.info('S%d(R%d): %s'%(generated_sentences, num_repetitions, sentence))
+          generated_sentences += 1
+          num_repetitions = 0
+        else:
+          num_repetitions += 1
+          if num_repetitions > 1000:
+            logging.info('1000 repetitions, exiting!')
+            return sentences
 
     return sentences
 
@@ -130,3 +238,5 @@ def main(_):
 
 if __name__ == "__main__":
   tf.app.run()
+
+

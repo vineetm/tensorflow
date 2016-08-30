@@ -74,7 +74,7 @@ flags.DEFINE_string("data_path", None, "data_path")
 flags.DEFINE_string("model_path", None, "model_path")
 flags.DEFINE_bool("use_fp16", False,
                   "Train using 16-bit floats instead of 32bit floats")
-flags.DEFINE_integer("gpu_device", 2, "gpu_device")
+flags.DEFINE_string("gpu_device", '/cpu:0', "gpu_device")
 FLAGS = flags.FLAGS
 
 
@@ -101,7 +101,7 @@ class PTBModel(object):
     # initialized to 1 but the hyperparameters of the model would need to be
     # different than reported in the paper.
 
-    gpu_device_name = '/gpu:%d'%FLAGS.gpu_device
+    gpu_device_name = '%s'%FLAGS.gpu_device
     logging.info('GPU Device: %s'%gpu_device_name)
     with tf.device(gpu_device_name):
       lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
