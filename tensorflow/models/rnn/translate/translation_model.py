@@ -10,7 +10,7 @@ logging.set_verbosity(tf.logging.INFO)
 
 class TranslationModel(object):
 
-  def __init__(self, model_path, data_path, vocab_size):
+  def __init__(self, model_path, data_path, vocab_size, model_size):
     self.session = tf.Session()
     self.model_path = model_path
     self.data_path = data_path
@@ -19,7 +19,7 @@ class TranslationModel(object):
       source_vocab_size= vocab_size,
       target_vocab_size = vocab_size,
       buckets=_buckets,
-      size = 128,
+      size = model_size,
       num_layers = 1,
       max_gradient_norm = 5.0,
       batch_size=1,
@@ -28,7 +28,8 @@ class TranslationModel(object):
       compute_prob=True,
       forward_only=True)
 
-    #self.model.saver.restore(self.session, args.model_path)
+    logging.info('Loading model from %s' % self.model_path)
+    self.model.saver.restore(self.session, self.model_path)
 
     # Load vocabularies.
     en_vocab_path = os.path.join(self.data_path,
@@ -39,18 +40,15 @@ class TranslationModel(object):
     self.en_vocab, _ = initialize_vocabulary(en_vocab_path)
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
-  def translate(self, sentence, output_sentence):
-    logging.info('Loading model from %s' % self.model_path)
-    self.model.saver.restore(self.session, self.model_path)
-
-    logging.info('Sentence: %s'%sentence)
+  def compute_prob(self, sentence, output_sentence):
+    #logging.info('Sentence: %s'%sentence)
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(sentence), self.en_vocab, normalize_digits=False)
-    logging.info('Sentence_IDs: %s'%str(token_ids))
+    #logging.info('Sentence_IDs: %s'%str(token_ids))
 
 
     output_token_ids = sentence_to_token_ids(tf.compat.as_bytes(output_sentence), self.fr_vocab, normalize_digits=False)
-    logging.info('Output Sentence: %s'%output_sentence)
-    logging.info('Output Token IDs: %s'%str(output_token_ids))
+    #logging.info('Output Sentence: %s'%output_sentence)
+    #logging.info('Output Token IDs: %s'%str(output_token_ids))
 
     bucket_id = min([b for b in xrange(len(_buckets))
                      if _buckets[b][0] > len(token_ids)])
@@ -72,9 +70,14 @@ class TranslationModel(object):
                                      target_weights, bucket_id, True)
 
 
-    prob = 0.0
+    log_prob = 0.0
     for index, token_id in enumerate(output_token_ids):
       probs = tf.nn.softmax(output_logits[index])
       tokens_probs = self.session.run(probs)
       token_prob = tokens_probs[0][token_id]
-      logging.info('Token[:%d]: %s Prob: %f'%(token_id, self.rev_fr_vocab[token_id], token_prob))
+      #logging.info('Token[:%d]: %s Prob: %f'%(token_id, self.rev_fr_vocab[token_id], token_prob))
+      log_prob += np.math.log(token_prob)
+
+    prob = np.math.exp(log_prob)
+    #logging.info('Log Prob: %f Prob: %f'%(log_prob, prob))
+    return prob
