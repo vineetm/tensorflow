@@ -56,6 +56,7 @@ class Seq2SeqModel(object):
                use_lstm=False,
                num_samples=512,
                forward_only=False,
+               compute_prob=True,
                dtype=tf.float32):
     """Create the model.
 
@@ -155,7 +156,7 @@ class Seq2SeqModel(object):
     if forward_only:
       self.outputs, self.losses = tf.nn.seq2seq.model_with_buckets(
           self.encoder_inputs, self.decoder_inputs, targets,
-          self.target_weights, buckets, lambda x, y: seq2seq_f(x, y, True),
+          self.target_weights, buckets, lambda x, y: seq2seq_f(x, y, not compute_prob),
           softmax_loss_function=softmax_loss_function)
       # If we use output projection, we need to project outputs for decoding.
       if output_projection is not None:
@@ -246,6 +247,30 @@ class Seq2SeqModel(object):
       return outputs[1], outputs[2], None  # Gradient norm, loss, no outputs.
     else:
       return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
+
+  def get_decode_batch(self, source_token_ids, target_token_ids):
+    encoder_size = len(source_token_ids)
+    decoder_size = len(target_token_ids)
+
+    # Now we create batch-major vectors from the data selected above.
+    batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
+
+    # Batch encoder inputs are just re-indexed encoder_inputs.
+    for length_idx in xrange(encoder_size):
+      batch_encoder_inputs.append(
+        np.array([source_token_ids[length_idx]], dtype=np.int32))
+
+    batch_decoder_inputs.append(np.array([1], dtype=np.int32))
+    # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
+    for length_idx in xrange(decoder_size):
+      batch_decoder_inputs.append(
+        np.array([target_token_ids[length_idx]], dtype=np.int32))
+
+    # Create target_weights to be 0 for targets that are padding.
+    batch_weight = np.ones(self.batch_size, dtype=np.float32)
+    batch_weights.append(batch_weight)
+    return batch_encoder_inputs, batch_decoder_inputs, batch_weights
+
 
   def get_batch(self, data, bucket_id):
     """Get a random batch of data from the specified bucket, prepare for step.

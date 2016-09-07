@@ -44,6 +44,7 @@ import tensorflow as tf
 from tensorflow.models.rnn.translate import data_utils
 from tensorflow.models.rnn.translate import seq2seq_model
 
+from data_utils import prepare_nsu_data
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
@@ -127,8 +128,7 @@ def create_model(session, forward_only):
       FLAGS.batch_size,
       FLAGS.learning_rate,
       FLAGS.learning_rate_decay_factor,
-      forward_only=forward_only,
-      dtype=dtype)
+      forward_only=forward_only)
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
     print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
@@ -143,8 +143,12 @@ def train():
   """Train a en->fr translation model using WMT data."""
   # Prepare WMT data.
   print("Preparing WMT data in %s" % FLAGS.data_dir)
-  en_train, fr_train, en_dev, fr_dev, _, _ = data_utils.prepare_wmt_data(
-      FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
+
+  en_train, fr_train, en_dev, fr_dev, _, _ = prepare_nsu_data(
+    FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
+
+  # en_train, fr_train, en_dev, fr_dev, _, _ = data_utils.prepare_wmt_data(
+  #     FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
 
   with tf.Session() as sess:
     # Create model.
