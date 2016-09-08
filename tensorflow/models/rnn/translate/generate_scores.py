@@ -25,7 +25,7 @@ def setup_args():
   parser.add_argument('candidates')
   parser.add_argument('k', type=int, help='# of Candidates to select')
   parser.add_argument('input', help='Input Data')
-  parser.add_argument('gold', help='Gold Data')
+ # parser.add_argument('gold', help='Gold Data')
   parser.add_argument('-t', help='Num threads', default=8, type=int)
   args = parser.parse_args()
   return args
@@ -74,17 +74,17 @@ def main():
   global tm
   tm = TranslationModel(args.model_path, args.data_path, args.vocab_size, args.model_size)
 
-  gold_lines = codecs.open(args.gold, 'r', 'utf-8').readlines()
+#  gold_lines = codecs.open(args.gold, 'r', 'utf-8').readlines()
   input_lines = codecs.open(args.input, 'r', 'utf-8').readlines()
-  assert (len(input_lines) == len(gold_lines))
+ # assert (len(input_lines) == len(gold_lines))
 
   logging.info('Inputs: %d Candidates:%d'%(len(input_lines), len(candidates)))
 
   fw = codecs.open(args.input + '.results', 'w', 'utf-8')
 
-  ranks = OrderedDict()
-  for index in range(len(candidates)):
-    ranks[index+1] = 0
+  # ranks = OrderedDict()
+  # for index in range(len(candidates)):
+  #   ranks[index+1] = 0
 
 
   for index, input_line in enumerate(input_lines):
@@ -95,14 +95,14 @@ def main():
     fw.write('Input: %s\n'%input_line.strip())
     num = 1
     for (prob, candidate) in results:
-      if candidate == gold_lines[index].strip():
-        ranks[num] += 1
-      num += 1
+  #    if candidate == gold_lines[index].strip():
+  #      ranks[num] += 1
+  #    num += 1
       fw.write('Candidate: %s prob %f\n'%(candidate, prob))
     fw.write('\n')
-    logging.info('Recall Ranks :%s'%str(ranks))
+   # logging.info('Recall Ranks :%s'%str(ranks))
 
-  logging.info(ranks)
+  #logging.info(ranks)
 
 if __name__ == '__main__':
     main()
