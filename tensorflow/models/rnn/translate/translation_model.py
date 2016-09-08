@@ -93,11 +93,14 @@ class TranslationModel(object):
     #   token_probs = self.session.run(tf.nn.softmax(output_logits[index]))
     #   log_prob += np.math.log(token_probs[0][token_id])
 
-    log_prob = np.sum([np.math.log(self.session.run(tf.nn.softmax(output_logits[index]))[0][output_token_ids[index]])
-                for index in range(len(output_token_ids))])
+    # log_prob = np.sum([np.math.log(self.session.run(tf.nn.softmax(output_logits[index]))[0][output_token_ids[index]])
+    #             for index in range(len(output_token_ids))])
+
+    prob = np.sum([self.session.run(tf.nn.softmax(output_logits[index]))[0][output_token_ids[index]]
+                       for index in range(len(output_token_ids))]) / len(output_token_ids)
 
     end_5 = timeit.default_timer()
-    prob = np.math.exp(log_prob)
+    # prob = np.math.exp(log_prob)
     #logging.info('Prob computation: %ds' % (end_4 - st_4))
 
     return prob

@@ -3,6 +3,8 @@ import argparse, logging, codecs
 from multiprocessing import Pool, Manager
 from itertools import repeat
 from datetime import datetime
+from collections import OrderedDict
+
 import timeit
 
 from translation_model import TranslationModel
@@ -23,6 +25,7 @@ def setup_args():
   parser.add_argument('candidates')
   parser.add_argument('k', type=int, help='# of Candidates to select')
   parser.add_argument('input', help='Input Data')
+  parser.add_argument('gold', help='Gold Data')
   parser.add_argument('-t', help='Num threads', default=8, type=int)
   args = parser.parse_args()
   return args
@@ -68,21 +71,38 @@ def main():
 
   #Get Candidates
   candidates = read_candidates(args)
-  logging.info('File: %s Num Candidates:%d'%(args.candidates, len(candidates)))
   global tm
   tm = TranslationModel(args.model_path, args.data_path, args.vocab_size, args.model_size)
 
+  gold_lines = codecs.open(args.gold, 'r', 'utf-8').readlines()
+  input_lines = codecs.open(args.input, 'r', 'utf-8').readlines()
+  assert (len(input_lines) == len(gold_lines))
 
-  for input_line in codecs.open(args.input, 'r', 'utf-8'):
+  logging.info('Inputs: %d Candidates:%d'%(len(input_lines), len(candidates)))
+
+  fw = codecs.open(args.input + '.results', 'w', 'utf-8')
+
+  ranks = OrderedDict()
+  for index in range(len(candidates)):
+    ranks[index+1] = 0
+
+
+  for index, input_line in enumerate(input_lines):
     probs = compute_scores(args, candidates, input_line)
-    logging.info('Input_Line: %s'%input_line)
-
     results = zip(probs, candidates)
     results = sorted(results, key=lambda tup: tup[0], reverse=True)
 
+    fw.write('Input: %s\n'%input_line.strip())
+    num = 1
     for (prob, candidate) in results:
-      logging.info('Candidate: %s prob %f'%(candidate, prob))
+      if candidate == gold_lines[index].strip():
+        ranks[num] += 1
+      num += 1
+      fw.write('Candidate: %s prob %f\n'%(candidate, prob))
+    fw.write('\n')
+    logging.info('Recall Ranks :%s'%str(ranks))
 
+  logging.info(ranks)
 
 if __name__ == '__main__':
     main()
