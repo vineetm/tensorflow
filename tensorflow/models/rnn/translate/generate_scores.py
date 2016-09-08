@@ -2,6 +2,9 @@ import argparse, logging, codecs
 
 from multiprocessing import Pool, Manager
 from itertools import repeat
+from datetime import datetime
+import timeit
+
 from translation_model import TranslationModel
 
 class Work(object):
@@ -46,7 +49,14 @@ def compute_scores(args, candidates, input_line):
   # p.close()
   # p.join()
 
-  results = [tm.compute_prob(input_line, candidate) for candidate in candidates]
+  results = []
+  st = timeit.default_timer()
+  for i, candidate in enumerate(candidates):
+    results.append(tm.compute_prob(input_line, candidate))
+  end = timeit.default_timer()
+  logging.info('Total time: %ds'% (end - st))
+
+  # results = [tm.compute_prob(input_line, candidate) for candidate in candidates]
   return results
 
 

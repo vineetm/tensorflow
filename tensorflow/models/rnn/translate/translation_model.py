@@ -4,7 +4,9 @@ import tensorflow as tf
 from seq2seq_model import Seq2SeqModel
 from translate import _buckets
 from data_utils import initialize_vocabulary, sentence_to_token_ids
+import timeit
 
+from datetime import datetime
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
 
@@ -41,43 +43,61 @@ class TranslationModel(object):
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
   def compute_prob(self, sentence, output_sentence):
-    #logging.info('Sentence: %s'%sentence)
+    #st_0 = datetime.now().microsecond
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(sentence), self.en_vocab, normalize_digits=False)
+    #end_0 = datetime.now().microsecond
+    #logging.info('Input to tokens: %dus'%(end_0 - st_0))
+
+    #logging.info('Sentence: %s'%sentence)
     #logging.info('Sentence_IDs: %s'%str(token_ids))
 
-
+    #st_1 = datetime.now().microsecond
     output_token_ids = sentence_to_token_ids(tf.compat.as_bytes(output_sentence), self.fr_vocab, normalize_digits=False)
+    #end_1 = datetime.now().microsecond
+    #logging.info('Total:%dus Output to tokens: %dus' %((end_1 - st_0), (end_1 - st_1)))
+
     #logging.info('Output Sentence: %s'%output_sentence)
     #logging.info('Output Token IDs: %s'%str(output_token_ids))
 
     bucket_id = min([b for b in xrange(len(_buckets))
                      if _buckets[b][0] > len(token_ids)])
 
-    #logging.info('Bucket id: %d'%bucket_id)
-
+    #st_2 = datetime.now().microsecond
     encoder_inputs, decoder_inputs, target_weights = self.model.get_batch(
       {bucket_id: [(token_ids, [])]}, bucket_id)
+    #end_2 = datetime.now().microsecond
+    #logging.info('Total:%dus Decoder format: %dus' % ((end_2 - st_0), (end_2 - st_2)))
 
+    #st_3 = datetime.now().microsecond
     for index in range(len(output_token_ids)):
       decoder_inputs[index+1] = np.array([output_token_ids[index]], dtype=np.float32)
+    #end_3 = datetime.now().microsecond
+    #logging.info('Total:%dus Decoder inputs: %dus' % ((end_3 - st_0), (end_3 - st_3)))
 
     #logging.info('encoder_inputs Len:%d %s'%(len(encoder_inputs), str(encoder_inputs)))
     #logging.info('decoder_inputs Len:%d %s' % (len(decoder_inputs), str(decoder_inputs)))
     #logging.info('target weights Shape:%d %s' % (len(target_weights), str(target_weights)))
 
     # Get output logits for the sentence.
+    #st_4 = timeit.default_timer()
     _, _, output_logits = self.model.step(self.session, encoder_inputs, decoder_inputs,
                                      target_weights, bucket_id, True)
 
+    #end_4 = timeit.default_timer()
+    #logging.info('Logits: %ds' % (end_4 - st_4))
 
     log_prob = 0.0
-    for index, token_id in enumerate(output_token_ids):
-      probs = tf.nn.softmax(output_logits[index])
-      tokens_probs = self.session.run(probs)
-      token_prob = tokens_probs[0][token_id]
-      #logging.info('Token[:%d]: %s Prob: %f'%(token_id, self.rev_fr_vocab[token_id], token_prob))
-      log_prob += np.math.log(token_prob)
+    st_5 = timeit.default_timer()
 
+    # for index, token_id in enumerate(output_token_ids):
+    #   token_probs = self.session.run(tf.nn.softmax(output_logits[index]))
+    #   log_prob += np.math.log(token_probs[0][token_id])
+
+    log_prob = np.sum([np.math.log(self.session.run(tf.nn.softmax(output_logits[index]))[0][output_token_ids[index]])
+                for index in range(len(output_token_ids))])
+
+    end_5 = timeit.default_timer()
     prob = np.math.exp(log_prob)
-    #logging.info('Log Prob: %f Prob: %f'%(log_prob, prob))
+    #logging.info('Prob computation: %ds' % (end_4 - st_4))
+
     return prob
