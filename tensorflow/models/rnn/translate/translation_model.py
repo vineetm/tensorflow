@@ -42,6 +42,14 @@ class TranslationModel(object):
     self.en_vocab, _ = initialize_vocabulary(en_vocab_path)
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
+  def set_output_tokens(self, bucket_id, output_token_ids, decoder_inputs):
+    for index in range(len(output_token_ids)):
+      if index >= _buckets[bucket_id][1]:
+        logging.info('Bucket Size:%d Found:%d'%(_buckets[bucket_id[1]], index))
+        return
+      decoder_inputs[index + 1] = np.array([output_token_ids[index]], dtype=np.float32)
+
+
   def compute_prob(self, sentence, output_sentence):
     #st_0 = datetime.now().microsecond
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(sentence), self.en_vocab, normalize_digits=False)
@@ -68,10 +76,7 @@ class TranslationModel(object):
     #end_2 = datetime.now().microsecond
     #logging.info('Total:%dus Decoder format: %dus' % ((end_2 - st_0), (end_2 - st_2)))
 
-    #st_3 = datetime.now().microsecond
-    for index in range(len(output_token_ids)):
-      decoder_inputs[index+1] = np.array([output_token_ids[index]], dtype=np.float32)
-    #end_3 = datetime.now().microsecond
+    self.set_output_tokens(bucket_id, output_token_ids, decoder_inputs)
     #logging.info('Total:%dus Decoder inputs: %dus' % ((end_3 - st_0), (end_3 - st_3)))
 
     #logging.info('encoder_inputs Len:%d %s'%(len(encoder_inputs), str(encoder_inputs)))
