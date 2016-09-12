@@ -64,6 +64,12 @@ def compute_scores(input_line, prefix_tree, k):
       return final_scores, num_comparisons
 
 
+def get_bestk_candidates(input_line, prefix_tree, k):
+  scores, num_comparisons = compute_scores(input_line, prefix_tree, k)
+  sorted_scores = sorted(scores, key=lambda t: t[0], reverse=True)
+  return sorted_scores[:k]
+
+
 def main():
   # Logging setup
   logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
@@ -84,15 +90,11 @@ def main():
   fw = codecs.open(args.input + '.k%d.results'%args.k, 'w', 'utf-8')
 
   for line_num, input_line in enumerate(input_lines):
-    scores, num_comparisons = compute_scores(input_line, prefix_tree, args.k)
-    fw.write('Input: %s Comparions:%d\n\n' % (input_line.strip(), num_comparisons))
-
-    sorted_scores = sorted(scores, key=lambda t:t[0], reverse=True)
-    logging.info('Final Sorted Scores')
+    sorted_scores = get_bestk_candidates(input_line, prefix_tree, args.k)
     for score in sorted_scores:
       p, c = score
-      logging.info('Str: %s Pr:%f'%(c, p))
-      fw.write('C:%s Pr:%f\n'%(c, p))
+      logging.info('Str: %s Pr:%f' % (c, p))
+      fw.write('C:%s Pr:%f\n' % (c, p))
 
 
 if __name__ == '__main__':
