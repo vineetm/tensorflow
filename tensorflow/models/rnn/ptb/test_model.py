@@ -5,7 +5,6 @@ import tensorflow as tf, sys
 import numpy as np
 import time, os
 from ptb_word_lm import PTBModel, LargeConfig
-from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize as tokenizer
 
 import cPickle as pkl
@@ -16,8 +15,6 @@ FLAGS = flags.FLAGS
 
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
-
-STOPW = stopwords.words('english')
 
 class SentenceGenerator(object):
 
@@ -34,9 +31,6 @@ class SentenceGenerator(object):
     self.generate_id_to_word()
     logging.info('Vocab Size: %d' % len(self.word_to_id))
 
-    self.stopw = [word for word in STOPW if word in self.word_to_id]
-    logging.info('Num stopwords found:%d'% len(self.stopw))
-
     self.model_path = model_path
     self.config = LargeConfig
     self.config.batch_size = 1
@@ -48,6 +42,10 @@ class SentenceGenerator(object):
     # Define Decoder Model
     with tf.variable_scope("model", reuse=None, initializer=initializer):
       self.model = PTBModel(is_training=False, config=self.config, is_decoder=True)
+
+    self.session = tf.Session()
+    saver = tf.train.Saver()
+    saver.restore(self.session, self.model_path)
 
 
   def sample(self, probs, keywords):
@@ -104,27 +102,24 @@ class SentenceGenerator(object):
                  else self.word_to_id['<unk>']
                  for token in tokens]
 
-    with tf.Session() as session:
-      saver = tf.train.Saver()
-      saver.restore(session, self.model_path)
+    state = self.session.run(self.model.initial_state)
 
-      #Get initial LSTM state
-      state = session.run(self.model.initial_state)
+    sentence_prob = 1.0
+    for index, token_id in enumerate(token_ids):
+      if index == len(token_ids) - 1:
+        return sentence_prob
 
-      sentence_prob = 1.0
-      for index, token_id in enumerate(token_ids):
-        if index == len(token_ids) - 1:
-          return sentence_prob
+      fetches = [self.model.probs, self.model.final_state]
 
-        fetches = [self.model.probs, self.model.final_state]
+      feed_dict = {}
+      x = np.array([[token_id]])
+      feed_dict[self.model.input_data] = x
+      feed_dict[self.model.initial_state] = state
 
-        feed_dict = {}
-        x = np.array([[token_id]])
-        feed_dict[self.model.input_data] = x
-        feed_dict[self.model.initial_state] = state
+      probs, state = self.session.run(fetches, feed_dict)
+      sentence_prob *= probs[0][token_ids[index + 1]]
 
-        probs, state = session.run(fetches, feed_dict)
-        sentence_prob *= probs[0][token_ids[index + 1]]
+    return sentence_prob
 
 
   def generate_sentence(self, start_token_id, session, keywords=None):
