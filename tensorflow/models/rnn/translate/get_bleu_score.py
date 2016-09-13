@@ -14,6 +14,8 @@ def setup_args():
   parser.add_argument('gold', help='Gold output')
   parser.add_argument('k', type=int, help='Top K results to consider')
   parser.add_argument('-best', dest='best', action='store_true', default=False)
+  parser.add_argument('-replace', dest='replace', action='store_true', default=False,
+                      help='replace with UNK symbols')
   args = parser.parse_args()
   return args
 
@@ -62,7 +64,11 @@ def main():
   for index, result in enumerate(input_results):
     logging.info('Index:%d Len:%d'%(index, len(result)))
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
-    replaced_lines = [replace_line(line[1], unk_map) for line in result[:args.k]]
+
+    if args.replace:
+      replaced_lines = [replace_line(line[1], unk_map) for line in result[:args.k]]
+    else:
+      replaced_lines = [line[1] for line in result[:args.k]]
 
     if args.best:
       bleu_scores = [bleu_score(gold_lines[index], line) for line in replaced_lines]
