@@ -32,7 +32,7 @@ def compute_prob(input_line, prefix, tree):
     return tm.compute_prob(input_line, candidates[tree[LEAVES][0]])
   return tm.compute_prob(input_line, prefix)
 
-def prune_work(work, k=5):
+def prune_work(work, k):
   pending_work = sorted(work, key=lambda t:t.prob)[-k:]
   return pending_work
 
@@ -40,6 +40,7 @@ def get_prefix(tree, prefix):
   if len(tree[SUBTREE][prefix][LEAVES]) == 1:
     return candidates[tree[SUBTREE][prefix][LEAVES][0]]
   return prefix
+
 
 def compute_scores(input_line, prefix_tree, k):
   pending_work = [PendingWork(-1.0, prefix_tree, '')]
@@ -59,7 +60,7 @@ def compute_scores(input_line, prefix_tree, k):
       else:
         pending_work.append(PendingWork(tm.compute_prob(input_line, prefix), work.tree[SUBTREE][prefix], prefix))
 
-    pending_work = prune_work(pending_work, k)
+    pending_work = prune_work(pending_work, k*2)
     if len(pending_work) == 0:
       return final_scores, num_comparisons
 
@@ -67,7 +68,7 @@ def compute_scores(input_line, prefix_tree, k):
 def get_bestk_candidates(input_line, prefix_tree, k):
   scores, num_comparisons = compute_scores(input_line, prefix_tree, k)
   sorted_scores = sorted(scores, key=lambda t: t[0], reverse=True)
-  return sorted_scores[:k]
+  return sorted_scores, num_comparisons
 
 
 def main():
@@ -84,18 +85,21 @@ def main():
 
   global candidates
   candidates = pkl.load(open(args.candidates))
-
   logging.info('Candidates:%d Tree Leaves:%d'%(len(candidates), len(prefix_tree[LEAVES])))
 
-  fw = codecs.open(args.input + '.k%d.results'%args.k, 'w', 'utf-8')
-
+  final_results = []
   for line_num, input_line in enumerate(input_lines):
-    sorted_scores = get_bestk_candidates(input_line, prefix_tree, args.k)
+    result = []
+    sorted_scores, num_comparisons = get_bestk_candidates(input_line, prefix_tree, args.k)
+    logging.info('Input:(%d) %s #Comparisons:%d'%(line_num, input_line.strip(), num_comparisons))
+
     for score in sorted_scores:
       p, c = score
       logging.info('Str: %s Pr:%f' % (c, p))
-      fw.write('C:%s Pr:%f\n' % (c, p))
+      result.append((p, c))
+    final_results.append(result)
 
+  pkl.dump(final_results, open(args.input + '.results.pkl', 'w'))
 
 if __name__ == '__main__':
     main()
