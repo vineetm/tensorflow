@@ -67,7 +67,7 @@ def main():
     if args.best:
       bleu_scores = [bleu_score(gold_lines[index], line) for line in replaced_lines]
       best_index = np.argmax(bleu_scores)
-      logging.info('Line:%d Best:%d'%(index, best_index))
+      logging.info('Line:%d Best:%d Score:%f'%(index, best_index, bleu_scores[best_index]))
     else:
       best_index = 0
 
