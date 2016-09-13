@@ -104,10 +104,10 @@ class SentenceGenerator(object):
 
     state = self.session.run(self.model.initial_state)
 
-    sentence_prob = 1.0
+    total_prob = 1.0
     for index, token_id in enumerate(token_ids):
       if index == len(token_ids) - 1:
-        return sentence_prob
+        return total_prob / len(token_ids)
 
       fetches = [self.model.probs, self.model.final_state]
 
@@ -117,9 +117,7 @@ class SentenceGenerator(object):
       feed_dict[self.model.initial_state] = state
 
       probs, state = self.session.run(fetches, feed_dict)
-      sentence_prob *= probs[0][token_ids[index + 1]]
-
-    return sentence_prob
+      total_prob += probs[0][token_ids[index + 1]]
 
 
   def generate_sentence(self, start_token_id, session, keywords=None):
