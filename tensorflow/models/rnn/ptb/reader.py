@@ -22,13 +22,15 @@ from __future__ import print_function
 import collections
 import os
 
+import cPickle as pkl
 import numpy as np
 import tensorflow as tf
 
+logging = tf.logging
 
 def _read_words(filename):
   with tf.gfile.GFile(filename, "r") as f:
-    return f.read().replace("\n", "<eos>").split()
+    return f.read().replace("\n", " <eos> ").split()
 
 
 def _build_vocab(filename):
@@ -76,6 +78,10 @@ def ptb_raw_data(data_path=None):
   valid_data = _file_to_word_ids(valid_path, word_to_id)
   test_data = _file_to_word_ids(test_path, word_to_id)
   vocabulary = len(word_to_id)
+
+  vocab_file = os.path.join(data_path, 'vocab.pkl')
+  logging.info('Vocab Size: %d File:%s'%(len(word_to_id), vocab_file))
+  pkl.dump(word_to_id, open(vocab_file, 'wb'))
   return train_data, valid_data, test_data, vocabulary
 
 
