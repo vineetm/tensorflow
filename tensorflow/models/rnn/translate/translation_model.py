@@ -12,14 +12,15 @@ logging.set_verbosity(tf.logging.INFO)
 
 class TranslationModel(object):
 
-  def __init__(self, model_path, data_path, vocab_size, model_size):
+  def __init__(self, model_path, data_path, src_vocab_size, target_vocab_size,
+               model_size):
     self.session = tf.Session()
     self.model_path = model_path
     self.data_path = data_path
 
     self.model = Seq2SeqModel(
-      source_vocab_size= vocab_size,
-      target_vocab_size = vocab_size,
+      source_vocab_size= src_vocab_size,
+      target_vocab_size = target_vocab_size,
       buckets=_buckets,
       size = model_size,
       num_layers = 1,
@@ -35,9 +36,9 @@ class TranslationModel(object):
 
     # Load vocabularies.
     en_vocab_path = os.path.join(self.data_path,
-                                 "vocab%d.en" % vocab_size)
+                                 "vocab%d.en" % src_vocab_size)
     fr_vocab_path = os.path.join(self.data_path,
-                                 "vocab%d.fr" % vocab_size)
+                                 "vocab%d.fr" % target_vocab_size)
 
     self.en_vocab, _ = initialize_vocabulary(en_vocab_path)
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)

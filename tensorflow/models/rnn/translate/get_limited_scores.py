@@ -1,18 +1,20 @@
-import argparse, codecs, logging, cPickle as pkl
+import argparse, codecs, logging, cPickle as pkl, os
 from translation_model import TranslationModel
-from commons import LEAVES, SUBTREE
+from commons import LEAVES, SUBTREE, DEFAULT_CANDIDATES, DEFAULT_TREE
 
 
 def setup_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument('model_path')
-  parser.add_argument('data_path')
-  parser.add_argument('vocab_size', type=int)
+  parser.add_argument('train')
+  parser.add_argument('model')
+  parser.add_argument('src_vocab_size', type=int)
+  parser.add_argument('target_vocab_size', type=int)
   parser.add_argument('model_size', type=int)
+
   parser.add_argument('input', help='Input Data')
   parser.add_argument('-k', type=int, default=5, help='# of Candidates to select')
-  parser.add_argument('-candidates', default='candidates.pkl')
-  parser.add_argument('-tree', default='cand_tree.pkl')
+  parser.add_argument('-candidates', default=DEFAULT_CANDIDATES)
+  parser.add_argument('-tree', default=DEFAULT_TREE)
   args = parser.parse_args()
   return args
 
@@ -78,13 +80,18 @@ def main():
   logging.info(args)
 
   global tm
-  tm = TranslationModel(args.model_path, args.data_path, args.vocab_size, args.model_size)
+  model_path = os.path.join(args.train, 'models/%s'%args.model)
+  data_path = os.path.join(args.train, 'data')
+  tm = TranslationModel(model_path, data_path, args.src_vocab_size, args.src_vocab_size, args.model_size)
 
   input_lines = codecs.open(args.input, 'r', 'utf-8').readlines()
-  prefix_tree = pkl.load(open(args.tree))
+
+  prefix_tree_path = os.path.join(args.train, args.tree)
+  prefix_tree = pkl.load(open(prefix_tree_path))
 
   global candidates
-  candidates = pkl.load(open(args.candidates))
+  candidates_path = os.path.join(args.train, args.candidates)
+  candidates = pkl.load(open(candidates_path))
   logging.info('Candidates:%d Tree Leaves:%d'%(len(candidates), len(prefix_tree[LEAVES])))
 
   final_results = []
