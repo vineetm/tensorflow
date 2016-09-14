@@ -1,10 +1,6 @@
 import argparse, logging, codecs
 
-from multiprocessing import Pool, Manager
-from itertools import repeat
-from datetime import datetime
-from collections import OrderedDict
-
+import cPickle as pkl
 import timeit
 
 from translation_model import TranslationModel
@@ -23,10 +19,8 @@ def setup_args():
   parser.add_argument('vocab_size', type=int)
   parser.add_argument('model_size', type=int)
   parser.add_argument('candidates')
-  parser.add_argument('k', type=int, help='# of Candidates to select')
+  #parser.add_argument('k', type=int, help='# of Candidates to select')
   parser.add_argument('input', help='Input Data')
- # parser.add_argument('gold', help='Gold Data')
-  parser.add_argument('-t', help='Num threads', default=8, type=int)
   args = parser.parse_args()
   return args
 
@@ -44,18 +38,13 @@ def compute_prob((candidate, input_line)):
 
 
 def compute_scores(args, candidates, input_line):
-  # jobs_data = zip(candidates, repeat(input_line))
-  # logging.info('Jobs Data Size:%d'%len(jobs_data))
-  #
-  # p = Pool(args.t)
-  # results = p.map(compute_prob, jobs_data)
-  # p.close()
-  # p.join()
-
   results = []
   st = timeit.default_timer()
+  logging.info('Debug: Input Line: %s'%input_line)
   for i, candidate in enumerate(candidates):
-    results.append(tm.compute_prob(input_line, candidate))
+    curr_prob = tm.compute_prob(input_line, candidate)
+    logging.info('C: %s Pr:%f'%(candidate, curr_prob))
+    results.append(curr_prob)
   end = timeit.default_timer()
   logging.info('Total time: %ds'% (end - st))
 
@@ -64,6 +53,32 @@ def compute_scores(args, candidates, input_line):
 
 
 def main():
+  # Logging setup
+  logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+  args = setup_args()
+  logging.info(args)
+
+  global tm
+  tm = TranslationModel(args.model_path, args.data_path, args.vocab_size, args.model_size)
+
+  input_lines = codecs.open(args.input, 'r', 'utf-8').readlines()
+  fw = codecs.open(args.input + '.results', 'w', 'utf-8')
+
+  prefix_tree = pkl.load(open(args.candidates))
+
+  for index, input_line in enumerate(input_lines):
+    logging.info('Input Line: %s'%input_line)
+    candidates = prefix_tree['']['what'].keys()
+    logging.info('Num Candidates: %d'%len(candidates))
+    probs = [tm.compute_prob(input_line, output_sentence) for output_sentence in candidates]
+    results = zip(candidates, probs)
+    results = sorted(results, key = lambda t : t[1], reverse=True)
+
+    for (candidate, prob) in results:
+      logging.info('Candidate: %s Prob: %f'%(candidate, prob))
+
+
+def old_main():
   #Logging setup
   logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
   args = setup_args()
@@ -86,7 +101,6 @@ def main():
   # for index in range(len(candidates)):
   #   ranks[index+1] = 0
 
-
   for index, input_line in enumerate(input_lines):
     probs = compute_scores(args, candidates, input_line)
     results = zip(probs, candidates)
@@ -105,5 +119,5 @@ def main():
   #logging.info(ranks)
 
 if __name__ == '__main__':
-    main()
+    old_main()
 
