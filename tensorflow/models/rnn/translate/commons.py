@@ -2,6 +2,8 @@ from collections import OrderedDict
 
 LEAVES='_LEAVES_'
 SUBTREE='_SUBTREE_'
+DEFAULT_CANDIDATES = 'candidates.pkl'
+DEFAULT_TREE = 'candidates_tree.pkl'
 
 
 def compute_unk_map(src_tokens, stopw):
