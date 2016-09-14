@@ -62,7 +62,7 @@ def compute_scores(input_line, prefix_tree, k):
       else:
         pending_work.append(PendingWork(tm.compute_prob(input_line, prefix), work.tree[SUBTREE][prefix], prefix))
 
-    pending_work = prune_work(pending_work, k*2)
+    pending_work = prune_work(pending_work, k)
     if len(pending_work) == 0:
       return final_scores, num_comparisons
 
@@ -82,7 +82,7 @@ def main():
   global tm
   model_path = os.path.join(args.train, 'models/%s'%args.model)
   data_path = os.path.join(args.train, 'data')
-  tm = TranslationModel(model_path, data_path, args.src_vocab_size, args.src_vocab_size, args.model_size)
+  tm = TranslationModel(model_path, data_path, args.src_vocab_size, args.target_vocab_size, args.model_size)
 
   input_lines = codecs.open(args.input, 'r', 'utf-8').readlines()
 
@@ -105,6 +105,10 @@ def main():
       logging.info('Str: %s Pr:%f' % (c, p))
       result.append((p, c))
     final_results.append(result)
+
+    if line_num != (len(input_line) - 1):
+      pkl.dump(final_results, open(args.input + '.%d.results.pkl'%line_num, 'w'))
+
 
   pkl.dump(final_results, open(args.input + '.results.pkl', 'w'))
 
