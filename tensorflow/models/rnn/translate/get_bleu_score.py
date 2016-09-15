@@ -68,19 +68,19 @@ def main():
   for index, result in enumerate(input_results):
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
 
+    candidates = [line[1] for line in result[:args.k]]
+
     if args.replace:
-      replaced_lines = [replace_line(line[1], unk_map) for line in result[:args.k]]
-    else:
-      replaced_lines = [line[1] for line in result[:args.k]]
+      candidates = [replace_line(candidate, unk_map) for candidate in candidates]
 
     if args.best:
-      bleu_scores = [bleu_score(gold_lines[index], line) for line in replaced_lines]
+      bleu_scores = [bleu_score(gold_lines[index], line) for line in candidates]
       best_index = np.argmax(bleu_scores)
       logging.info('Line:%d Best:%d Score:%f'%(index, best_index, bleu_scores[best_index]))
     else:
       best_index = 0
 
-    fw.write(replaced_lines[best_index].strip() + '\n')
+    fw.write(candidates[best_index].strip() + '\n')
 
 
 if __name__ == '__main__':
