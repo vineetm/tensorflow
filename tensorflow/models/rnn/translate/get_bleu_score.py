@@ -55,6 +55,7 @@ def main():
   orig_input_lines = codecs.open(os.path.join(args.dir, ORIG_PREFIX + args.inputs), 'r', 'utf-8').readlines()
 
   input_results = pkl.load(open(os.path.join(args.dir, args.inputs + RESULTS_SUFFIX), 'r'))
+  gold_lines_unk = codecs.open(os.path.join(args.dir, args.gold[5:]), 'r', 'utf-8').readlines()
   gold_lines = codecs.open(os.path.join(args.dir, args.gold), 'r', 'utf-8').readlines()
 
   assert len(input_lines) == len(input_results)
@@ -68,19 +69,36 @@ def main():
   for index, result in enumerate(input_results):
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
 
-    candidates = [line[1] for line in result[:args.k]]
+    orig_candidates = [line[1] for line in result[:args.k]]
 
     if args.replace:
-      candidates = [replace_line(candidate, unk_map) for candidate in candidates]
+      candidates = [replace_line(candidate, unk_map) for candidate in orig_candidates]
+    else:
+      candidates  = orig_candidates
 
     if args.best:
       bleu_scores = [bleu_score(gold_lines[index], line) for line in candidates]
       best_index = np.argmax(bleu_scores)
-      logging.info('Line:%d Best:%d Score:%f'%(index, best_index, bleu_scores[best_index]))
     else:
       best_index = 0
 
+
+    logging.info('Orig_Input: %s'%orig_input_lines[index].strip())
+    logging.info('Input_UNK: %s'%input_lines[index].strip())
+
+    logging.info('')
+    logging.info('Orig_Gold: %s' % gold_lines[index].strip())
+    logging.info('Gold_UNK: %s' % gold_lines_unk[index].strip())
+
+    logging.info('')
+    logging.info('Selected Best:%d Score:%f' % (best_index, bleu_scores[best_index]))
+
+    for candidate_index in range(len(candidates)):
+      logging.info('C_UNK:%d ::%s'%(candidate_index, orig_candidates[candidate_index].strip()))
+      logging.info('C:%d[%f] ::%s'%(candidate_index, bleu_scores[candidate_index], candidates[candidate_index]))
+
     fw.write(candidates[best_index].strip() + '\n')
+    logging.info('')
 
 
 if __name__ == '__main__':
