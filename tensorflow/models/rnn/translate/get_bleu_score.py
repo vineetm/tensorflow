@@ -66,7 +66,6 @@ def main():
   fw = codecs.open(os.path.join(args.dir, args.inputs + BEST_BLEU_SUFFIX), 'w', 'utf-8')
 
   for index, result in enumerate(input_results):
-    logging.info('Index:%d Len:%d'%(index, len(result)))
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
 
     if args.replace:
