@@ -44,6 +44,8 @@ import tensorflow as tf
 from tensorflow.models.rnn.translate import data_utils
 from tensorflow.models.rnn.translate import seq2seq_model
 
+tf.logging.set_verbosity(tf.logging.INFO)
+
 from data_utils import prepare_nsu_data
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
@@ -138,6 +140,57 @@ def create_model(session, forward_only):
     session.run(tf.initialize_all_variables())
   return model
 
+class DevPerplexity:
+  def __init__(self, bucket_id, max_wait=5):
+    self.count = 0
+    self.perplexity = 9999.0
+    self.last = 9999.0
+    self.iteration_num = 0
+    self.max_wait = max_wait
+    self.bucket_id = bucket_id
+
+  def __str__(self):
+    return 'BID:%d C:(%d/%d) Perpl: %f Step:%d'%(self.bucket_id,
+                                                 self.count, self.max_wait,
+                                                 self.perplexity, self.iteration_num)
+
+  def save_best(self, perplexity, iteration_num):
+    if perplexity > self.last:
+      self.count += 1
+      return False
+    else:
+      self.count = 0
+      if perplexity < self.perplexity:
+        self.perplexity = perplexity
+        self.iteration_num = iteration_num
+        tf.logging.info('Saved:%s' % str(self))
+        return True
+
+  def should_early_stop(self):
+    if self.count > self.max_wait:
+      tf.logging.info('Early_Stop OK: %s'%str(self))
+      return True
+    tf.logging.info('Early_Stop NO: %s'% str(self))
+    return False
+
+'''
+Early stop if all bucket IDs say we are done!
+'''
+def should_early_stop(dev_perplexity):
+  for bucket_id in dev_perplexity:
+    if not dev_perplexity[bucket_id].should_early_stop():
+      return False
+
+  tf.logging.info('Early Stop ALL!')
+  return True
+
+
+def should_save_model(saved_results):
+  for bucket_id in saved_results:
+    if saved_results[bucket_id] is False:
+      return False
+  return True
+
 
 def train():
   """Train a en->fr translation model using WMT data."""
@@ -150,7 +203,14 @@ def train():
   # en_train, fr_train, en_dev, fr_dev, _, _ = data_utils.prepare_wmt_data(
   #     FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
 
-  with tf.Session() as sess:
+  # Device Placemement options
+  cf = tf.ConfigProto()
+  # cf.gpu_options.allocator_type = 'BFC'
+  cf.log_device_placement = True
+  cf.gpu_options.allow_growth = True
+
+
+  with tf.Session(config=cf) as sess:
     # Create model.
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, False)
@@ -163,6 +223,15 @@ def train():
     train_bucket_sizes = [len(train_set[b]) for b in xrange(len(_buckets))]
     train_total_size = float(sum(train_bucket_sizes))
 
+    # Save best perplexity for dev_set for each bucket
+    dev_preplexity = {}
+    dev_saved_results = {}
+    for bucket_id in xrange(len(_buckets)):
+      if len(dev_set[bucket_id]) == 0:
+        continue
+      dev_preplexity[bucket_id] = DevPerplexity(bucket_id)
+      dev_saved_results[bucket_id] = False
+
     # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
     # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
     # the size if i-th training bucket, as used later.
@@ -173,6 +242,8 @@ def train():
     step_time, loss = 0.0, 0.0
     current_step = 0
     previous_losses = []
+
+
     while True:
       # Choose a bucket according to data distribution. We pick a random number
       # in [0, 1] and use the corresponding interval in train_buckets_scale.
@@ -197,14 +268,12 @@ def train():
         print ("global step %d learning rate %.4f step-time %.2f perplexity "
                "%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
                          step_time, perplexity))
+
         # Decrease learning rate if no improvement was seen over last 3 times.
         if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
           sess.run(model.learning_rate_decay_op)
         previous_losses.append(loss)
-        # Save checkpoint and zero timer and loss.
-        checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
-        model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-        step_time, loss = 0.0, 0.0
+
         # Run evals on development set and print their perplexity.
         for bucket_id in xrange(len(_buckets)):
           if len(dev_set[bucket_id]) == 0:
@@ -217,7 +286,22 @@ def train():
           eval_ppx = math.exp(float(eval_loss)) if eval_loss < 300 else float(
               "inf")
           print("  eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
+          dev_saved_results[bucket_id] = dev_preplexity[bucket_id].save_best(eval_ppx, model.global_step.eval())
         sys.stdout.flush()
+
+        # Save checkpoint and zero timer and loss.
+        # Save model only when results improve
+        if should_save_model(dev_saved_results):
+          checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
+          tf.logging.info('Saving model to %s-%d'%('translate.ckpt', model.global_step.eval()))
+          model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+        if should_early_stop(dev_preplexity):
+          tf.logging.info('Early STOP at %d' %model.global_step.eval())
+          return
+
+        step_time, loss = 0.0, 0.0
+
 
 
 def decode():
