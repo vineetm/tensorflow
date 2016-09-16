@@ -18,6 +18,9 @@ def setup_args():
   parser.add_argument('-best', dest='best', action='store_true', default=False)
   parser.add_argument('-replace', dest='replace', action='store_true', default=False,
                       help='replace with UNK symbols')
+  parser.add_argument('-missing', dest='missing', action='store_true', default=False,
+                      help='replace unresolved UNK symbols')
+
   args = parser.parse_args()
   return args
 
@@ -43,6 +46,27 @@ def bleu_score(reference, hypothesis):
     logging.error('BLEU not found! %s'%output)
     return 0.0
 
+def find_unk_symbols(line):
+  unk_syms = [token for token in line.split( ) if re.search(r'UNK', token)]
+  return set(unk_syms)
+
+def fill_missing_unk(candidates, unk_map):
+  unk_candidates = []
+  unk_keys = set(unk_map.keys())
+
+  for candidate in candidates:
+    unk_symbols = find_unk_symbols(candidate)
+    rem_symbols = unk_symbols - unk_keys
+
+    if len(rem_symbols) == 1:
+      symbol = list(rem_symbols)[0]
+      replacement_symbols = unk_keys - unk_symbols
+      unk_candidates.extend([re.sub(symbol, replacement_symbol, candidate)
+                             for replacement_symbol in replacement_symbols])
+    else:
+      unk_candidates.append(candidate)
+
+  return unk_candidates
 
 def main():
   #Command line arguments setup
@@ -71,13 +95,20 @@ def main():
 
     orig_candidates = [line[1] for line in result[:args.k]]
 
-    if args.replace:
-      candidates = [replace_line(candidate, unk_map) for candidate in orig_candidates]
+    if args.missing:
+      unk_candidates = fill_missing_unk(orig_candidates, unk_map)
     else:
-      candidates  = orig_candidates
+      unk_candidates = orig_candidates
 
+    logging.info('Orig candidates:%d New:%d'%(len(orig_candidates), len(unk_candidates)))
+
+    if args.replace:
+      candidates = [replace_line(candidate, unk_map) for candidate in unk_candidates]
+    else:
+      candidates  = unk_candidates
+
+    bleu_scores = [bleu_score(gold_lines[index], line) for line in candidates]
     if args.best:
-      bleu_scores = [bleu_score(gold_lines[index], line) for line in candidates]
       best_index = np.argmax(bleu_scores)
     else:
       best_index = 0
@@ -94,7 +125,7 @@ def main():
     logging.info('Selected Best:%d Score:%f' % (best_index, bleu_scores[best_index]))
 
     for candidate_index in range(len(candidates)):
-      logging.info('C_UNK:%d ::%s'%(candidate_index, orig_candidates[candidate_index].strip()))
+      logging.info('C_UNK:%d ::%s'%(candidate_index, unk_candidates[candidate_index].strip()))
       logging.info('C:%d[%f] ::%s'%(candidate_index, bleu_scores[candidate_index], candidates[candidate_index]))
 
     fw.write(candidates[best_index].strip() + '\n')
