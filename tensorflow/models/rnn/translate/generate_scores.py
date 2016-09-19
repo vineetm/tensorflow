@@ -14,7 +14,6 @@ def setup_args():
   parser.add_argument('model_size', type=int)
   parser.add_argument('input', help='Input Data')
   parser.add_argument('candidates')
-  parser.add_argument('-k', type=int, default=100)
   args = parser.parse_args()
   return args
 
@@ -49,7 +48,7 @@ def main():
   for line_num, input_line in enumerate(input_lines):
     st_curr = timeit.default_timer()
     probs = [(tm.compute_prob(input_line, candidate), candidate) for candidate in candidates]
-    sorted_probs = sorted(probs, key = lambda t:t[0], reverse=True)[:args.k]
+    sorted_probs = sorted(probs, key = lambda t:t[0], reverse=True)
     end_curr = timeit.default_timer()
     logging.info('Line:%d Time:%d'%(line_num, end_curr - st_curr))
     final_results.append(sorted_probs)
