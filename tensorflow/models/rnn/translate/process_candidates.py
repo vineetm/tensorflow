@@ -1,5 +1,5 @@
 import logging, argparse, codecs
-import cPickle as pkl, os
+import cPickle as pkl, os, timeit
 
 from data_utils import initialize_vocabulary
 from commons import LEAVES, SUBTREE, DEFAULT_CANDIDATES, DEFAULT_TREE

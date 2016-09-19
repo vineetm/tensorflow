@@ -1,4 +1,4 @@
-import argparse, codecs, logging, cPickle as pkl, os
+import argparse, codecs, logging, cPickle as pkl, os, timeit
 from translation_model import TranslationModel
 from commons import LEAVES, SUBTREE, DEFAULT_CANDIDATES, DEFAULT_TREE
 
@@ -15,6 +15,7 @@ def setup_args():
   parser.add_argument('-k', type=int, default=5, help='# of Candidates to select')
   parser.add_argument('-candidates', default=DEFAULT_CANDIDATES)
   parser.add_argument('-tree', default=DEFAULT_TREE)
+  parser.add_argument('-savefreq', default=10, type=int)
   args = parser.parse_args()
   return args
 
@@ -45,9 +46,16 @@ def get_prefix(tree, prefix):
 
 
 def compute_scores(input_line, prefix_tree, k):
-  pending_work = [PendingWork(-1.0, prefix_tree, '')]
+  # pending_work = [PendingWork(-1.0, prefix_tree, '')]
   final_scores = []
   num_comparisons = 0
+
+  leaves = prefix_tree[SUBTREE].keys()
+  pending_work = [PendingWork(tm.compute_prob(input_line, leaf) ,prefix_tree[SUBTREE][leaf], leaf)
+                  for leaf in leaves]
+  num_comparisons += len(pending_work)
+
+  pending_work = prune_work(pending_work, k)
 
   while True:
     work = pending_work.pop()
@@ -95,20 +103,27 @@ def main():
   logging.info('Candidates:%d Tree Leaves:%d'%(len(candidates), len(prefix_tree[LEAVES])))
 
   final_results = []
+
+  st = timeit.default_timer()
   for line_num, input_line in enumerate(input_lines):
     result = []
+    st_curr = timeit.default_timer()
     sorted_scores, num_comparisons = get_bestk_candidates(input_line, prefix_tree, args.k)
     logging.info('Input:(%d) %s #Comparisons:%d'%(line_num, input_line.strip(), num_comparisons))
 
     for score in sorted_scores:
       p, c = score
-      logging.info('Str: %s Pr:%f' % (c, p))
+      #logging.info('Str: %s Pr:%f' % (c, p))
       result.append((p, c))
     final_results.append(result)
 
-    if line_num != (len(input_line) - 1):
+    logging.info('Line:%d Time :%d sec' %(line_num, (timeit.default_timer() - st_curr)))
+
+    if line_num % args.savefreq == 0:
       pkl.dump(final_results, open(args.input + '.%d.results.pkl'%line_num, 'w'))
 
+  end = timeit.default_timer()
+  logging.info('Total Time :%d sec'%(end - st))
 
   pkl.dump(final_results, open(args.input + '.results.pkl', 'w'))
 
