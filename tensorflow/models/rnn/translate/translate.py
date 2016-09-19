@@ -249,6 +249,9 @@ def train():
     previous_losses = []
 
 
+    #Track how many times we did not get better resuls in dev
+    num_dev_unchanged = 0
+
     while True:
       # Choose a bucket according to data distribution. We pick a random number
       # in [0, 1] and use the corresponding interval in train_buckets_scale.
@@ -297,9 +300,16 @@ def train():
         # Save checkpoint and zero timer and loss.
         # Save model only when results improve
         if should_save_model(dev_saved_results):
+          num_dev_unchanged = 0
           checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
           tf.logging.info('Saving model to %s-%d'%('translate.ckpt', model.global_step.eval()))
           model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+        else:
+          num_dev_unchanged += 1
+          if num_dev_unchanged >= 50:
+            tf.logging.info('Early EXIT, dev unchanged:%d'%num_dev_unchanged)
+            return
 
         if should_early_stop(dev_preplexity):
           tf.logging.info('Early STOP at %d' %model.global_step.eval())
