@@ -157,17 +157,22 @@ class DevPerplexity:
   def save_best(self, perplexity, iteration_num):
     if perplexity > self.last:
       self.count += 1
+      self.last = perplexity
+      tf.logging.info('Not Saved:%s ' % str(self))
       return False
     else:
       self.count = 0
+      self.last = perplexity
       if perplexity < self.perplexity:
         self.perplexity = perplexity
         self.iteration_num = iteration_num
         tf.logging.info('Saved:%s' % str(self))
         return True
+      tf.logging.info('Not Saved:%s '%str(self))
+      return False
 
   def should_early_stop(self):
-    if self.count > self.max_wait:
+    if self.count >= self.max_wait:
       tf.logging.info('Early_Stop OK: %s'%str(self))
       return True
     tf.logging.info('Early_Stop NO: %s'% str(self))
