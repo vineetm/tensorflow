@@ -100,7 +100,7 @@ def main():
     else:
       unk_candidates = orig_candidates
 
-    logging.info('Orig candidates:%d New:%d'%(len(orig_candidates), len(unk_candidates)))
+    logging.debug('Orig candidates:%d New:%d'%(len(orig_candidates), len(unk_candidates)))
 
     if args.replace:
       candidates = [replace_line(candidate, unk_map) for candidate in unk_candidates]
@@ -114,22 +114,22 @@ def main():
       best_index = 0
 
 
-    logging.info('Orig_Input: %s'%orig_input_lines[index].strip())
-    logging.info('Input_UNK: %s'%input_lines[index].strip())
+    logging.debug('Orig_Input: %s'%orig_input_lines[index].strip())
+    logging.debug('Input_UNK: %s'%input_lines[index].strip())
 
-    logging.info('')
-    logging.info('Orig_Gold: %s' % gold_lines[index].strip())
-    logging.info('Gold_UNK: %s' % gold_lines_unk[index].strip())
+    logging.debug('')
+    logging.debug('Orig_Gold: %s' % gold_lines[index].strip())
+    logging.debug('Gold_UNK: %s' % gold_lines_unk[index].strip())
 
-    logging.info('')
-    logging.info('Selected Best:%d Score:%f' % (best_index, bleu_scores[best_index]))
+    logging.debug('')
+    logging.info('Line: %d Selected Best:%d Score:%f' %(index, best_index, bleu_scores[best_index]))
 
     for candidate_index in range(len(candidates)):
-      logging.info('C_UNK:%d ::%s'%(candidate_index, unk_candidates[candidate_index].strip()))
-      logging.info('C:%d[%f] ::%s'%(candidate_index, bleu_scores[candidate_index], candidates[candidate_index]))
+      logging.debug('C_UNK:%d ::%s'%(candidate_index, unk_candidates[candidate_index].strip()))
+      logging.debug('C:%d[%f] ::%s'%(candidate_index, bleu_scores[candidate_index], candidates[candidate_index]))
 
     fw.write(candidates[best_index].strip() + '\n')
-    logging.info('')
+    logging.debug('')
 
 
 if __name__ == '__main__':

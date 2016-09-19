@@ -51,6 +51,11 @@ class TranslationModel(object):
       decoder_inputs[index + 1] = np.array([output_token_ids[index]], dtype=np.float32)
 
 
+  def compute_fraction(self, logit, token_index):
+    sum_all = np.sum(np.exp(logit))
+    return np.exp(logit[token_index]) / sum_all
+
+
   def compute_prob(self, sentence, output_sentence):
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(sentence), self.en_vocab, normalize_digits=False)
     output_token_ids = sentence_to_token_ids(tf.compat.as_bytes(output_sentence), self.fr_vocab, normalize_digits=False)
@@ -65,17 +70,15 @@ class TranslationModel(object):
     _, _, output_logits = self.model.step(self.session, encoder_inputs, decoder_inputs,
                                      target_weights, bucket_id, True)
 
-
-    # for index, token_id in enumerate(output_token_ids):
-    #   token_probs = self.session.run(tf.nn.softmax(output_logits[index]))
-    #   log_prob += np.math.log(token_probs[0][token_id])
-
     if len(decoder_inputs) > len(output_token_ids):
       max_len = len(output_token_ids)
     else:
       max_len = len(decoder_inputs)
 
-    prob = np.sum([self.session.run(tf.nn.softmax(output_logits[index]))[0][output_token_ids[index]]
-                       for index in range(max_len)]) / max_len
+    prob = np.sum([self.compute_fraction(output_logits[index][0], output_token_ids[index])
+                   for index in range(max_len)]) / max_len
+
+    # prob = np.sum([self.session.run(tf.nn.softmax(output_logits[index]))[0][output_token_ids[index]]
+    #                    for index in range(max_len)]) / max_len
 
     return prob
