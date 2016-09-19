@@ -34,7 +34,7 @@ def main():
   logging.info(args)
 
   global tm
-  model_path = os.path.join(args.train, 'models/%s' % args.model)
+  model_path = os.path.join(args.train, args.model)
   data_path = os.path.join(args.train, 'data')
   tm = TranslationModel(model_path, data_path, args.src_vocab_size, args.target_vocab_size, args.model_size)
 
