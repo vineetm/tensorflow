@@ -10,8 +10,8 @@ def setup_args():
   parser.add_argument('src_vocab_size', type=int)
   parser.add_argument('target_vocab_size', type=int)
   parser.add_argument('model_size', type=int)
-
   parser.add_argument('input', help='Input Data')
+  parser.add_argument('-num_layers', type=int, default=1)
   parser.add_argument('-k', type=int, default=5, help='# of Candidates to select')
   parser.add_argument('-candidates', default=DEFAULT_CANDIDATES)
   parser.add_argument('-tree', default=DEFAULT_TREE)
@@ -83,14 +83,15 @@ def get_bestk_candidates(input_line, prefix_tree, k):
 
 def main():
   # Logging setup
-  logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+  logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)
   args = setup_args()
   logging.info(args)
 
   global tm
-  model_path = os.path.join(args.train, 'models/%s'%args.model)
+  model_path = os.path.join(args.train, args.model)
   data_path = os.path.join(args.train, 'data')
-  tm = TranslationModel(model_path, data_path, args.src_vocab_size, args.target_vocab_size, args.model_size)
+  tm = TranslationModel(model_path, data_path, args.src_vocab_size, args.target_vocab_size,
+                        args.model_size, args.num_layers)
 
   input_lines = codecs.open(args.input, 'r', 'utf-8').readlines()
 

@@ -13,7 +13,7 @@ logging.set_verbosity(tf.logging.INFO)
 class TranslationModel(object):
 
   def __init__(self, model_path, data_path, src_vocab_size, target_vocab_size,
-               model_size):
+               model_size, num_layers=1):
     self.session = tf.Session()
     self.model_path = model_path
     self.data_path = data_path
@@ -23,7 +23,7 @@ class TranslationModel(object):
       target_vocab_size = target_vocab_size,
       buckets=_buckets,
       size = model_size,
-      num_layers = 1,
+      num_layers = num_layers,
       max_gradient_norm = 5.0,
       batch_size=1,
       learning_rate=0.5,

@@ -90,6 +90,7 @@ def main():
 
   fw = codecs.open(os.path.join(args.dir, args.inputs + BEST_BLEU_SUFFIX), 'w', 'utf-8')
 
+  perfect_matches = 0
   for index, result in enumerate(input_results):
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
 
@@ -122,6 +123,8 @@ def main():
     logging.debug('Gold_UNK: %s' % gold_lines_unk[index].strip())
 
     logging.debug('')
+    if bleu_scores[best_index] == 100.0:
+      perfect_matches += 1
     logging.info('Line: %d Selected Best:%d Score:%f' %(index, best_index, bleu_scores[best_index]))
 
     for candidate_index in range(len(candidates)):
@@ -131,6 +134,7 @@ def main():
     fw.write(candidates[best_index].strip() + '\n')
     logging.debug('')
 
+  logging.info('Perfect Matches %d/%d'%(perfect_matches, len(input_lines)))
 
 if __name__ == '__main__':
     main()
