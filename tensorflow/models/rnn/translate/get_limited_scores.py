@@ -120,8 +120,8 @@ def main():
 
     logging.info('Line:%d Time :%d sec' %(line_num, (timeit.default_timer() - st_curr)))
 
-    if line_num % args.savefreq == 0:
-      pkl.dump(final_results, open(args.input + '.%d.results.pkl'%line_num, 'w'))
+    # if line_num % args.savefreq == 0:
+    #   pkl.dump(final_results, open(args.input + '.%d.results.pkl'%line_num, 'w'))
 
   end = timeit.default_timer()
   logging.info('Total Time :%d sec'%(end - st))

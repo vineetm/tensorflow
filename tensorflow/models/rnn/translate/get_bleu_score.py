@@ -16,6 +16,7 @@ def setup_args():
   parser.add_argument('gold', help='Gold output')
   parser.add_argument('k', type=int, help='Top K results to consider')
   parser.add_argument('-best', dest='best', action='store_true', default=False)
+  parser.add_argument('-lm', dest='lm', action='store_true', default=False)
   parser.add_argument('-replace', dest='replace', action='store_true', default=False,
                       help='replace with UNK symbols')
   parser.add_argument('-missing', dest='missing', action='store_true', default=False,
@@ -78,7 +79,11 @@ def main():
   input_lines = codecs.open(os.path.join(args.dir, args.inputs), 'r', 'utf-8').readlines()
   orig_input_lines = codecs.open(os.path.join(args.dir, ORIG_PREFIX + args.inputs), 'r', 'utf-8').readlines()
 
-  input_results = pkl.load(open(os.path.join(args.dir, args.inputs + RESULTS_SUFFIX), 'r'))
+  if args.lm:
+    input_results = pkl.load(open(os.path.join(args.dir, 'lm.' + args.inputs + RESULTS_SUFFIX), 'r'))
+  else:
+    input_results = pkl.load(open(os.path.join(args.dir, args.inputs + RESULTS_SUFFIX), 'r'))
+
   gold_lines_unk = codecs.open(os.path.join(args.dir, args.gold[5:]), 'r', 'utf-8').readlines()
   gold_lines = codecs.open(os.path.join(args.dir, args.gold), 'r', 'utf-8').readlines()
 
