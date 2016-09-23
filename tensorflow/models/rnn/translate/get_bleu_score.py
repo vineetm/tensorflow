@@ -21,6 +21,7 @@ def setup_args():
                       help='replace with UNK symbols')
   parser.add_argument('-missing', dest='missing', action='store_true', default=False,
                       help='replace unresolved UNK symbols')
+  parser.add_argument('-debug', dest='debug', action='store_true', default=False, help='debug mode')
 
   args = parser.parse_args()
   return args
@@ -72,7 +73,10 @@ def fill_missing_unk(candidates, unk_map):
 def main():
   #Command line arguments setup
   args = setup_args()
-  logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+  if args.debug:
+    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)
+  else:
+    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
   logging.info(args)
 
   #Load Input data, and Input results, Gold_lines
