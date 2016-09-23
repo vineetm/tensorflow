@@ -48,27 +48,30 @@ def bleu_score(reference, hypothesis):
     logging.error('BLEU not found! %s'%output)
     return 0.0
 
-def find_unk_symbols(line):
-  unk_syms = [token for token in line.split( ) if re.search(r'UNK', token)]
-  return set(unk_syms)
 
-def fill_missing_unk(candidates, unk_map):
+def fill_missing_symbols(orig_candidates, unk_map):
   unk_candidates = []
-  unk_keys = set(unk_map.keys())
+  symbol_start = set(['Q', 'A', '_'])
 
-  for candidate in candidates:
-    unk_symbols = find_unk_symbols(candidate)
-    rem_symbols = unk_symbols - unk_keys
+  for candidate in orig_candidates:
+    tokens = candidate.split()
+    symbols = set([token for token in tokens if token[0] in symbol_start])
+    unresolved_symbols = symbols - set(unk_map.keys())
+    logging.debug('C:%s Unresolved:%s'%(candidate, str(unresolved_symbols)))
 
-    if len(rem_symbols) == 1:
-      symbol = list(rem_symbols)[0]
-      replacement_symbols = unk_keys - unk_symbols
-      unk_candidates.extend([re.sub(symbol, replacement_symbol, candidate)
-                             for replacement_symbol in replacement_symbols])
-    else:
+    if len(unresolved_symbols) == 0:
       unk_candidates.append(candidate)
+      continue
 
+    if len(unresolved_symbols) == 1:
+      unresolved_symbol = list(unresolved_symbols)[0]
+      unused_symbols = set(unk_map.keys()) - symbols
+      for ununsed_symbol in unused_symbols:
+        new_candidate = re.sub(unresolved_symbol, ununsed_symbol, candidate)
+        logging.debug('New Candidate: %s'%new_candidate)
+        unk_candidates.append(new_candidate)
   return unk_candidates
+
 
 def main():
   #Command line arguments setup
@@ -102,15 +105,13 @@ def main():
   perfect_matches = 0
   for index, result in enumerate(input_results):
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
-
     orig_candidates = [line[1] for line in result[:args.k]]
 
     if args.missing:
-      unk_candidates = fill_missing_unk(orig_candidates, unk_map)
+      unk_candidates = fill_missing_symbols(orig_candidates, unk_map)
+      logging.info('Orig candidates:%d New:%d' % (len(orig_candidates), len(unk_candidates)))
     else:
-      unk_candidates = orig_candidates
-
-    logging.debug('Orig candidates:%d New:%d'%(len(orig_candidates), len(unk_candidates)))
+     unk_candidates = orig_candidates
 
     if args.replace:
       candidates = [replace_line(candidate, unk_map) for candidate in unk_candidates]
