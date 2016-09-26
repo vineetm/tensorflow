@@ -140,62 +140,6 @@ def create_model(session, forward_only):
     session.run(tf.initialize_all_variables())
   return model
 
-class DevPerplexity:
-  def __init__(self, bucket_id, max_wait=5):
-    self.count = 0
-    self.perplexity = 9999.0
-    self.last = 9999.0
-    self.iteration_num = 0
-    self.max_wait = max_wait
-    self.bucket_id = bucket_id
-
-  def __str__(self):
-    return 'BID:%d C:(%d/%d) Perpl: %f Step:%d'%(self.bucket_id,
-                                                 self.count, self.max_wait,
-                                                 self.perplexity, self.iteration_num)
-
-  def save_best(self, perplexity, iteration_num):
-    if perplexity > self.last:
-      self.count += 1
-      self.last = perplexity
-      tf.logging.info('Not Saved:%s ' % str(self))
-      return False
-    else:
-      self.count = 0
-      self.last = perplexity
-      if perplexity < self.perplexity:
-        self.perplexity = perplexity
-        self.iteration_num = iteration_num
-        tf.logging.info('Saved:%s' % str(self))
-        return True
-      tf.logging.info('Not Saved:%s '%str(self))
-      return False
-
-  def should_early_stop(self):
-    if self.count >= self.max_wait:
-      tf.logging.info('Early_Stop OK: %s'%str(self))
-      return True
-    tf.logging.info('Early_Stop NO: %s'% str(self))
-    return False
-
-'''
-Early stop if all bucket IDs say we are done!
-'''
-def should_early_stop(dev_perplexity):
-  for bucket_id in dev_perplexity:
-    if not dev_perplexity[bucket_id].should_early_stop():
-      return False
-
-  tf.logging.info('Early Stop ALL!')
-  return True
-
-
-def should_save_model(saved_results):
-  for bucket_id in saved_results:
-    if saved_results[bucket_id] is False:
-      return False
-  return True
-
 
 def train():
   """Train a en->fr translation model using WMT data."""
@@ -229,13 +173,7 @@ def train():
     train_total_size = float(sum(train_bucket_sizes))
 
     # Save best perplexity for dev_set for each bucket
-    dev_preplexity = {}
-    dev_saved_results = {}
-    for bucket_id in xrange(len(_buckets)):
-      if len(dev_set[bucket_id]) == 0:
-        continue
-      dev_preplexity[bucket_id] = DevPerplexity(bucket_id)
-      dev_saved_results[bucket_id] = False
+    best_ppx = 9999.0
 
     # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
     # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
@@ -247,7 +185,6 @@ def train():
     step_time, loss = 0.0, 0.0
     current_step = 0
     previous_losses = []
-
 
     #Track how many times we did not get better resuls in dev
     num_dev_unchanged = 0
@@ -283,6 +220,7 @@ def train():
         previous_losses.append(loss)
 
         # Run evals on development set and print their perplexity.
+        iter_ppx = 0.0
         for bucket_id in xrange(len(_buckets)):
           if len(dev_set[bucket_id]) == 0:
             print("  eval: empty bucket %d" % (bucket_id))
@@ -294,12 +232,14 @@ def train():
           eval_ppx = math.exp(float(eval_loss)) if eval_loss < 300 else float(
               "inf")
           print("  eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
-          dev_saved_results[bucket_id] = dev_preplexity[bucket_id].save_best(eval_ppx, model.global_step.eval())
+          iter_ppx += eval_ppx
         sys.stdout.flush()
 
         # Save checkpoint and zero timer and loss.
         # Save model only when results improve
-        if should_save_model(dev_saved_results):
+        if iter_ppx < best_ppx :
+          tf.logging.info('Old: %.2f New: %.2f'%(best_ppx, iter_ppx))
+          best_ppx = iter_ppx
           num_dev_unchanged = 0
           checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
           tf.logging.info('Saving model to %s-%d'%('translate.ckpt', model.global_step.eval()))
@@ -310,10 +250,6 @@ def train():
           if num_dev_unchanged >= 50:
             tf.logging.info('Early EXIT, dev unchanged:%d'%num_dev_unchanged)
             return
-
-        if should_early_stop(dev_preplexity):
-          tf.logging.info('Early STOP at %d' %model.global_step.eval())
-          return
 
         step_time, loss = 0.0, 0.0
 
