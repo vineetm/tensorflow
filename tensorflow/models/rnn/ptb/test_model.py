@@ -97,6 +97,7 @@ class SentenceGenerator(object):
   def compute_prob(self, sentence):
     # Lower case, tokenize, generate token #s
     sentence = sentence.lower()
+    sentence  = '<eos> ' + sentence
     tokens = tokenizer(sentence)
     token_ids = [self.word_to_id[token] if token in self.word_to_id
                  else self.word_to_id['<unk>']

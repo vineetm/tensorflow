@@ -1,57 +1,21 @@
-import argparse, codecs, logging, re
+import argparse, codecs, logging, os
 import cPickle as pkl
-import numpy as np
 
-np.random.seed(1543)
 
 from test_model import SentenceGenerator
-from commons import replace_line, get_unk_map
+from commons import get_unk_map, replace_line
 
-RESULTS_SUFFIX = '.results.pkl'
 ORIG_PREFIX = 'orig.'
-LM_RESULTS_SUFFIX = '.results.lm.pkl'
 
 def setup_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument('inputs', help='Inputs for which BLEU is to be computed')
-  parser.add_argument('k', type=int, help='Top K results to consider')
-  parser.add_argument('lm')
+  parser.add_argument('lm', help='Trained Language Model')
+  parser.add_argument('dir', help='Data Dir')
+  parser.add_argument('candidates', help='Candidates')
+  parser.add_argument('input', help='input file')
   parser.add_argument('-data', default='qs_data', help='LM Data path')
   args = parser.parse_args()
   return args
-
-def contains_symbols(line):
-  for token in line.split():
-    if re.search(r'UNK(\d+)', token):
-      return True
-  return False
-
-def fill_unknowns(line, cand_words):
-  candidates  = []
-
-  unk_tokens = [token for token in line.split() if re.search(r'UNK(\d+)', token)]
-  if len(cand_words) < len(unk_tokens):
-    return candidates
-
-
-
-
-
-def resolve_candidates(unk_candidates, unk_map):
-  final_candidates = []
-  cand_words = set()
-
-  for key in unk_map:
-    cand_words.add(unk_map[key])
-
-  for unk_candidate in unk_candidates:
-    resolved_line = replace_line(unk_candidate, unk_map)
-    if contains_symbols(resolved_line):
-      final_candidates.extend(fill_unknowns(resolved_line, cand_words))
-    else:
-      final_candidates.append(resolved_line)
-
-  return final_candidates
 
 
 def main():
@@ -60,39 +24,41 @@ def main():
   logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
   logging.info(args)
 
-  # Load Input data, and Input results, Gold_lines
-  input_lines = codecs.open(args.inputs, 'r', 'utf-8').readlines()
-  orig_input_lines = codecs.open(ORIG_PREFIX + args.inputs, 'r', 'utf-8').readlines()
-  input_results = pkl.load(open(args.inputs + RESULTS_SUFFIX, 'r'))
-
-  assert len(input_lines) == len(input_results)
-  assert len(orig_input_lines) == len(input_lines)
-
   #Load LM
   logging.info('Loading LM from data_path:%s model_path:%s'%(args.data, args.lm))
   lm = SentenceGenerator(args.data, args.lm)
 
+  #Read Candidates, and rescore them as per LM Scores
   lm_results = []
-  for index, result in enumerate(input_results):
-    logging.info('Index:%d #Results:%d'%(index, len(result)))
 
-    #Get Original UNK Map
+  candidates_path = os.path.join(args.dir, args.candidates)
+  results = pkl.load(open(candidates_path, 'r'))
+  logging.info('#Orig Results: %d'%len(results))
+
+  input_lines_path = os.path.join(args.dir, args.input)
+  input_lines = codecs.open(input_lines_path, 'r', 'utf-8').readlines()
+
+  orig_input_lines_path = os.path.join(args.dir, ORIG_PREFIX + args.input)
+  orig_input_lines = codecs.open(orig_input_lines_path, 'r', 'utf-8').readlines()
+
+  assert len(input_lines) == len(orig_input_lines)
+  assert len(input_lines) == len(results)
+
+  for index, result in enumerate(results[:5]):
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
+    logging.info('UNK_Map:%s'%str(unk_map))
+    replaced_sentences = [replace_line(sentence[1], unk_map) for sentence in result]
 
-    #Get Top-K Candidates
-    unk_candidates = [candidate[1] for candidate in result[:args.k]]
+    logging.info('Line:%d Candidates:%d'%(index, len(result)))
+    lm_scores = [(lm.compute_prob(sentence), sentence) for sentence in replaced_sentences]
 
-    resolved_candidates = resolve_candidates(unk_candidates, unk_map)
+    sorted_lm_scores = sorted(lm_scores, key=lambda score:score[0], reverse=True)
+    lm_results.append(sorted_lm_scores)
 
-    lm_candidates = ['<eos> ' + candidate for candidate in resolved_candidates]
-    scores = [(lm.compute_prob(candidate), ' '.join(candidate.split()[1:])) for candidate in lm_candidates]
-    scores = sorted(scores, key=lambda s: s[0], reverse=True)
+  logging.info('Num LM Results:%d'%len(lm_results))
 
-    lm_results.append(scores)
-    logging.info(index)
-
-  pkl.dump(lm_results, open(args.inputs + LM_RESULTS_SUFFIX, 'wb'))
-
+  lm_candidates_path = os.path.join(args.dir, 'lm.' + args.candidates)
+  pkl.dump(lm_results, open(lm_candidates_path, 'w'))
 
 if __name__ == '__main__':
     main()
