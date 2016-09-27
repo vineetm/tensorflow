@@ -2,7 +2,11 @@ from collections import OrderedDict
 
 LEAVES='_LEAVES_'
 SUBTREE='_SUBTREE_'
-
+ORIG_PREFIX = 'orig.'
+RESULTS_SUFFIX = 'results.pkl'
+FINAL_RESULTS_SUFFIX = 'final.results.pkl'
+SOURCE = 'en'
+TARGET =' fr'
 
 def compute_unk_map(src_tokens, stopw):
   unk_map = OrderedDict()
@@ -31,8 +35,9 @@ def get_unk_map(orig_line, replaced_line):
 
 
 def replace_line(line, unk_map):
-  tokens = line.split()
-  return ' '.join(replace_tokens(tokens, unk_map))
+  prob, unk_line = line
+  tokens = unk_line.split()
+  return (prob, ' '.join(replace_tokens(tokens, unk_map)))
 
 
 def replace_tokens(orig_tokens, unk_map):
