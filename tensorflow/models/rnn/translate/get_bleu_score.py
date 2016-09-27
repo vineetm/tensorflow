@@ -21,6 +21,7 @@ def setup_args():
                       help='replace with UNK symbols')
   parser.add_argument('-missing', dest='missing', action='store_true', default=False,
                       help='replace unresolved UNK symbols')
+  parser.add_argument('-phrases', dest='phrases', action='store_true', default=False, help='debug mode')
   parser.add_argument('-debug', dest='debug', action='store_true', default=False, help='debug mode')
 
   args = parser.parse_args()
@@ -73,6 +74,28 @@ def fill_missing_symbols(orig_candidates, unk_map):
   return unk_candidates
 
 
+def convert_phrases(orig_candidates):
+  candidates = []
+
+  for orig_candidate in orig_candidates:
+    tokens = orig_candidate.split()
+    final_tokens = []
+    for token in tokens:
+      if token[0] in set(['Q', 'A']):
+        final_tokens.append(token)
+        continue
+
+      sub_tokens = token.split('_')
+      if len(sub_tokens) > 1:
+        final_tokens.extend(sub_tokens)
+      else:
+        final_tokens.append(token)
+
+    candidates.append(' '.join(final_tokens))
+
+  return candidates
+
+
 def main():
   #Command line arguments setup
   args = setup_args()
@@ -93,6 +116,9 @@ def main():
 
   gold_lines_unk = codecs.open(os.path.join(args.dir, args.gold[5:]), 'r', 'utf-8').readlines()
   gold_lines = codecs.open(os.path.join(args.dir, args.gold), 'r', 'utf-8').readlines()
+
+  if args.phrases:
+    gold_lines = convert_phrases(gold_lines)
 
   assert len(input_lines) == len(input_results)
   assert len(input_lines) == len(gold_lines)
@@ -118,6 +144,8 @@ def main():
     else:
       candidates  = unk_candidates
 
+    if args.phrases:
+      candidates = convert_phrases(candidates)
     bleu_scores = [bleu_score(gold_lines[index], line) for line in candidates]
     if args.best:
       best_index = np.argmax(bleu_scores)
