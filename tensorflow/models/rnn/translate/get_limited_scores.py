@@ -59,7 +59,7 @@ def compute_scores(input_line, prefix_tree, k):
 
   while True:
     work = pending_work.pop()
-    logging.info('Work: %s Comparisons:%d Pending:%d'%(str(work), num_comparisons, len(pending_work)))
+    #logging.info('Work: %s Comparisons:%d Pending:%d'%(str(work), num_comparisons, len(pending_work)))
 
     prefixes = [get_prefix(work.tree, child) for child in work.tree[SUBTREE]]
     num_comparisons += len(prefixes)
