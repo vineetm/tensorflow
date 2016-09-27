@@ -3,6 +3,7 @@ import cPickle as pkl
 import numpy as np
 
 RESULTS_SUFFIX = '.results.pkl'
+FINAL_RESULTS_SUFFIX = '.final.results.pkl'
 ORIG_PREFIX = 'orig.'
 BEST_BLEU_SUFFIX = '.best_bleu'
 
@@ -16,7 +17,7 @@ def setup_args():
   parser.add_argument('gold', help='Gold output')
   parser.add_argument('k', type=int, help='Top K results to consider')
   parser.add_argument('-best', dest='best', action='store_true', default=False)
-  parser.add_argument('-lm', dest='lm', action='store_true', default=False)
+  parser.add_argument('-final', dest='final', action='store_true', default=False)
   parser.add_argument('-replace', dest='replace', action='store_true', default=False,
                       help='replace with UNK symbols')
   parser.add_argument('-missing', dest='missing', action='store_true', default=False,
@@ -109,8 +110,8 @@ def main():
   input_lines = codecs.open(os.path.join(args.dir, args.inputs), 'r', 'utf-8').readlines()
   orig_input_lines = codecs.open(os.path.join(args.dir, ORIG_PREFIX + args.inputs), 'r', 'utf-8').readlines()
 
-  if args.lm:
-    input_results = pkl.load(open(os.path.join(args.dir, 'lm.' + args.inputs + RESULTS_SUFFIX), 'r'))
+  if args.final:
+    input_results = pkl.load(open(os.path.join(args.dir, args.inputs + FINAL_RESULTS_SUFFIX), 'r'))
   else:
     input_results = pkl.load(open(os.path.join(args.dir, args.inputs + RESULTS_SUFFIX), 'r'))
 
