@@ -5,6 +5,7 @@ SUBTREE='_SUBTREE_'
 ORIG_PREFIX = 'orig.'
 RESULTS_SUFFIX = 'results.pkl'
 FINAL_RESULTS_SUFFIX = 'final.results.pkl'
+LM_SCORES_SUFFIX = 'lm.scores.pkl'
 SOURCE = 'en'
 TARGET =' fr'
 

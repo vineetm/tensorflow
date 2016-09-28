@@ -1,11 +1,7 @@
 import argparse, codecs, logging, os
 import cPickle as pkl
-
-
 from test_model import SentenceGenerator
-from commons import get_unk_map, replace_line
-
-ORIG_PREFIX = 'orig.'
+from commons import get_unk_map, replace_line, ORIG_PREFIX
 
 def setup_args():
   parser = argparse.ArgumentParser()
