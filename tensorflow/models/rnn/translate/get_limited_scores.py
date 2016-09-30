@@ -88,8 +88,8 @@ def get_bestk_candidates(candidates, new_candidates, input_line, prefix_tree, k)
   scores, num_comparisons = compute_scores(candidates, input_line, prefix_tree, k)
   logging.debug('Old Scores: %d'%len(scores))
 
-  scores = []
-  num_comparisons = 0
+  # scores = []
+  # num_comparisons = 0
   if new_candidates is not None:
     for new_candidate in new_candidates:
       scores.append((tm.compute_prob(input_line, new_candidate), new_candidate))
