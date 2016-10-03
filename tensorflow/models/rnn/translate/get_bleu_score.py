@@ -16,7 +16,6 @@ def setup_args():
   parser.add_argument('inputs', help='Inputs for which BLEU is to be computed')
   parser.add_argument('gold', help='Gold output')
   parser.add_argument('k', type=int, help='Top K results to consider')
-  parser.add_argument('-best', dest='best', action='store_true', default=False)
   parser.add_argument('-final', dest='final', action='store_true', default=False)
   parser.add_argument('-replace', dest='replace', action='store_true', default=False,
                       help='replace with UNK symbols')
@@ -57,21 +56,21 @@ def fill_missing_symbols(orig_candidates, unk_map):
 
   for candidate in orig_candidates:
     tokens = candidate.split()
-    symbols = set([token for token in tokens if token[0] in symbol_start])
-    unresolved_symbols = symbols - set(unk_map.keys())
+    symbols = [token for token in tokens if token[0] in symbol_start]
+    used_symbols = set(unk_map.keys())
+    unresolved_symbols = [symbol for symbol in symbols if symbol not in used_symbols]
     logging.debug('C:%s Unresolved:%s'%(candidate, str(unresolved_symbols)))
 
-    if len(unresolved_symbols) == 0:
-      unk_candidates.append(candidate)
-      continue
-
     if len(unresolved_symbols) == 1:
-      unresolved_symbol = list(unresolved_symbols)[0]
-      unused_symbols = set(unk_map.keys()) - symbols
+      unresolved_symbol = unresolved_symbols[0]
+      unused_symbols = used_symbols - set(symbols)
       for ununsed_symbol in unused_symbols:
         new_candidate = re.sub(unresolved_symbol, ununsed_symbol, candidate)
         logging.debug('New Candidate: %s'%new_candidate)
         unk_candidates.append(new_candidate)
+    else:
+      unk_candidates.append(candidate)
+
   return unk_candidates
 
 
@@ -132,13 +131,15 @@ def main():
   perfect_matches = 0
   for index, result in enumerate(input_results):
     unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
-    orig_candidates = [line[1] for line in result[:args.k]]
+    orig_candidates = [line[1] for line in result]
 
     if args.missing:
       unk_candidates = fill_missing_symbols(orig_candidates, unk_map)
-      logging.info('Orig candidates:%d New:%d' % (len(orig_candidates), len(unk_candidates)))
+      logging.info('Line: %d Orig candidates:%d New:%d' % (index, len(orig_candidates), len(unk_candidates)))
     else:
      unk_candidates = orig_candidates
+
+    unk_candidates = unk_candidates[:args.k]
 
     if args.replace:
       candidates = [replace_line(candidate, unk_map) for candidate in unk_candidates]
@@ -148,11 +149,7 @@ def main():
     if args.phrases:
       candidates = convert_phrases(candidates)
     bleu_scores = [bleu_score(gold_lines[index], line) for line in candidates]
-    if args.best:
-      best_index = np.argmax(bleu_scores)
-    else:
-      best_index = 0
-
+    best_index = np.argmax(bleu_scores)
 
     logging.debug('Orig_Input: %s'%orig_input_lines[index].strip())
     logging.debug('Input_UNK: %s'%input_lines[index].strip())
