@@ -47,9 +47,6 @@ class TranslationModel(object):
       return None
 
 
-    # logging.info('Loading model from %s' % self.model_path)
-    # self.model.saver.restore(self.session, self.model_path)
-
     # Load vocabularies.
     en_vocab_path = os.path.join(self.data_path,
                                  "vocab%d.en" % self.src_vocab_size)

@@ -4,7 +4,7 @@ LEAVES='_LEAVES_'
 SUBTREE='_SUBTREE_'
 DEFAULT_CANDIDATES = 'candidates.pkl'
 DEFAULT_TREE = 'candidates_tree.pkl'
-
+CONFIG_FILE = 'config.ckpt'
 
 def compute_unk_map(src_tokens, stopw):
   unk_map = OrderedDict()
