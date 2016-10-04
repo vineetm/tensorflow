@@ -48,6 +48,7 @@ import cPickle as pkl
 tf.logging.set_verbosity(tf.logging.INFO)
 
 from data_utils import prepare_nsu_data
+from commons import CONFIG_FILE
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
@@ -140,7 +141,7 @@ def setup_my_flags():
 
 
 def create_model(session, forward_only):
-  config_path = os.path.join(FLAGS.train_dir, 'config.ckpt')
+  config_path = os.path.join(FLAGS.train_dir, CONFIG_FILE)
   my_flags = setup_my_flags()
   pkl.dump(my_flags, open(config_path, 'w'))
   tf.logging.info('Saved Model configuration to %s' % config_path)

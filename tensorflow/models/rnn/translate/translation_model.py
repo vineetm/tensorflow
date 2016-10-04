@@ -1,44 +1,60 @@
-import argparse, os
+import os
 import numpy as np
 import tensorflow as tf
+import cPickle as pkl
 from seq2seq_model import Seq2SeqModel
 from translate import _buckets
 from data_utils import initialize_vocabulary, sentence_to_token_ids
-import timeit
-
-from datetime import datetime
+from commons import CONFIG_FILE
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
 
+
 class TranslationModel(object):
 
-  def __init__(self, model_path, data_path, src_vocab_size, target_vocab_size,
-               model_size, num_layers=1):
+  def __init__(self, models_dir):
+    config_file_path = os.path.join(models_dir, CONFIG_FILE)
+    logging.info('Loading Pre-trained seq2model:%s'%config_file_path)
+
+    config = pkl.load(open(config_file_path))
+    logging.info(config)
+
     self.session = tf.Session()
-    self.model_path = model_path
-    self.data_path = data_path
+    self.model_path = config['train_dir']
+    self.data_path = config['data_dir']
+    self.src_vocab_size = config['src_vocab_size']
+    self.target_vocab_size = config['target_vocab_size']
 
     self.model = Seq2SeqModel(
-      source_vocab_size= src_vocab_size,
-      target_vocab_size = target_vocab_size,
-      buckets=_buckets,
-      size = model_size,
-      num_layers = num_layers,
-      max_gradient_norm = 5.0,
+      source_vocab_size = config['src_vocab_size'],
+      target_vocab_size = config['target_vocab_size'],
+      buckets=config['_buckets'],
+      size = config['size'],
+      num_layers = config['num_layers'],
+      max_gradient_norm = config['max_gradient_norm'],
       batch_size=1,
-      learning_rate=0.5,
-      learning_rate_decay_factor=0.99,
+      learning_rate=config['learning_rate'],
+      learning_rate_decay_factor=config['learning_rate_decay_factor'],
       compute_prob=True,
       forward_only=True)
 
-    logging.info('Loading model from %s' % self.model_path)
-    self.model.saver.restore(self.session, self.model_path)
+    ckpt = tf.train.get_checkpoint_state(self.model_path)
+    if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+      logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+      self.model.saver.restore(self.session, ckpt.model_checkpoint_path)
+    else:
+      logging.info('Model not found!')
+      return None
+
+
+    # logging.info('Loading model from %s' % self.model_path)
+    # self.model.saver.restore(self.session, self.model_path)
 
     # Load vocabularies.
     en_vocab_path = os.path.join(self.data_path,
-                                 "vocab%d.en" % src_vocab_size)
+                                 "vocab%d.en" % self.src_vocab_size)
     fr_vocab_path = os.path.join(self.data_path,
-                                 "vocab%d.fr" % target_vocab_size)
+                                 "vocab%d.fr" % self.target_vocab_size)
 
     self.en_vocab, _ = initialize_vocabulary(en_vocab_path)
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
@@ -77,8 +93,4 @@ class TranslationModel(object):
 
     prob = np.sum([self.compute_fraction(output_logits[index][0], output_token_ids[index])
                    for index in range(max_len)]) / max_len
-
-    # prob = np.sum([self.session.run(tf.nn.softmax(output_logits[index]))[0][output_token_ids[index]]
-    #                    for index in range(max_len)]) / max_len
-
     return prob
