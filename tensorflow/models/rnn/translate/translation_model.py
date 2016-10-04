@@ -4,7 +4,7 @@ import cPickle as pkl
 from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids
 from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, \
-  get_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, get_rev_unk_map
+  get_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, get_rev_unk_map, fill_missing_symbols, generate_new_candidates
 from nltk.tokenize import word_tokenize as tokenizer
 from textblob.en.np_extractors import FastNPExtractor
 
@@ -224,7 +224,8 @@ class TranslationModel(object):
     return rev_unk_map, unk_map, input_sequence_orig, input_sequence
 
 
-  def get_seq2seq_candidates(self, input_sentence, phrase=True, generate_codes=True, k=100, work_buffer=5):
+  def get_seq2seq_candidates(self, input_sentence, missing=False, use_q1=True,
+                             generate_codes=True, k=100, work_buffer=5):
 
     if generate_codes:
       rev_unk_map, unk_map, input_seq_orig, input_seq = self.transform_input(input_sentence)
@@ -236,6 +237,15 @@ class TranslationModel(object):
       input_seq = input_sentence
 
     scores, num_comparisons = self.compute_scores(input_seq, work_buffer)
+    if missing:
+      scores = fill_missing_symbols(scores, rev_unk_map)
+
+    if use_q1:
+      new_candidates = generate_new_candidates(input_seq)
+      logging.info('New Q1 Candidates: %d'%len(new_candidates))
+      scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_candidates])
+
+    logging.info('Num candidates: %d'%len(scores))
     scores = sorted(scores, key=lambda t:t[0], reverse=True)[:k]
     if generate_codes:
       scores = [(score[0], replace_line(score[1], rev_unk_map)) for score in scores]
