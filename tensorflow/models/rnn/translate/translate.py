@@ -44,6 +44,7 @@ import tensorflow as tf
 from tensorflow.models.rnn.translate import data_utils
 from tensorflow.models.rnn.translate import seq2seq_model
 
+import cPickle as pkl
 tf.logging.set_verbosity(tf.logging.INFO)
 
 from data_utils import prepare_nsu_data
@@ -118,7 +119,32 @@ def read_data(source_path, target_path, max_size=None):
   return data_set
 
 
+'''
+Store model configurations in a dictionary
+Used for easy restoring of model
+'''
+def setup_my_flags():
+  my_flags = {}
+  my_flags['src_vocab_size'] = FLAGS.en_vocab_size
+  my_flags['target_vocab_size'] = FLAGS.fr_vocab_size
+  my_flags['_buckets'] = _buckets
+  my_flags['size'] = FLAGS.size
+  my_flags['num_layers'] = FLAGS.num_layers
+  my_flags['max_gradient_norm'] = FLAGS.max_gradient_norm
+  my_flags['batch_size'] = FLAGS.batch_size
+  my_flags['learning_rate'] = FLAGS.learning_rate
+  my_flags['learning_rate_decay_factor'] = FLAGS.learning_rate_decay_factor
+  my_flags['data_dir'] = FLAGS.data_dir
+  my_flags['train_dir'] = FLAGS.train_dir
+  return my_flags
+
+
 def create_model(session, forward_only):
+  config_path = os.path.join(FLAGS.train_dir, 'config.ckpt')
+  my_flags = setup_my_flags()
+  pkl.dump(my_flags, open(config_path, 'w'))
+  tf.logging.info('Saved Model configuration to %s' % config_path)
+
   """Create translation model and initialize or load parameters in session."""
   dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
   model = seq2seq_model.Seq2SeqModel(
@@ -132,6 +158,7 @@ def create_model(session, forward_only):
       FLAGS.learning_rate,
       FLAGS.learning_rate_decay_factor,
       forward_only=forward_only)
+
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
     print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
@@ -150,17 +177,14 @@ def train():
   en_train, fr_train, en_dev, fr_dev, _, _ = prepare_nsu_data(
     FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
 
-  # en_train, fr_train, en_dev, fr_dev, _, _ = data_utils.prepare_wmt_data(
-  #     FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
-
-  # Device Placemement options
-  cf = tf.ConfigProto()
-  # cf.gpu_options.allocator_type = 'BFC'
-  cf.log_device_placement = True
-  cf.gpu_options.allow_growth = True
+  # # Device Placemement options
+  # cf = tf.ConfigProto()
+  # # cf.gpu_options.allocator_type = 'BFC'
+  # cf.log_device_placement = True
+  # cf.gpu_options.allow_growth = True
 
 
-  with tf.Session(config=cf) as sess:
+  with tf.Session() as sess:
     # Create model.
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, False)
@@ -253,7 +277,6 @@ def train():
             return
 
         step_time, loss = 0.0, 0.0
-
 
 
 def decode():
