@@ -1,12 +1,17 @@
 import os, codecs, numpy as np
 import tensorflow as tf
 import cPickle as pkl
+import numpy as np
 from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids
-from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, \
-  get_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, get_rev_unk_map, fill_missing_symbols, generate_new_candidates
+from commons import get_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
+  get_rev_unk_map, fill_missing_symbols, generate_new_candidates, get_bleu_score, execute_bleu_command, get_unk_map
 from nltk.tokenize import word_tokenize as tokenizer
 from textblob.en.np_extractors import FastNPExtractor
+
+#Constants
+from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV_OUTPUT, ORIG_PREFIX, ALL_HYP, ALL_REF
+
 
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
@@ -164,14 +169,17 @@ class TranslationModel(object):
                    for index in range(max_len)]) / max_len
     return prob
 
+
   def prune_work(self, work, k):
     pending_work = sorted(work, key=lambda t: t.prob)[-k:]
     return pending_work
+
 
   def get_prefix(self, tree, prefix):
     if len(tree[SUBTREE][prefix][LEAVES]) == 1:
       return self.candidates[tree[SUBTREE][prefix][LEAVES][0]]
     return prefix
+
 
   def compute_scores(self, input_line, work_buffer):
     final_scores = []
@@ -224,8 +232,8 @@ class TranslationModel(object):
     return rev_unk_map, unk_map, input_sequence_orig, input_sequence
 
 
-  def get_seq2seq_candidates(self, input_sentence, missing=False, use_q1=True,
-                             generate_codes=True, k=100, work_buffer=5):
+  def get_seq2seq_candidates(self, input_sentence, orig_unk_map=None, k=100, generate_codes=True,
+                             missing=False, use_q1=True, work_buffer=5):
 
     if generate_codes:
       rev_unk_map, unk_map, input_seq_orig, input_seq = self.transform_input(input_sentence)
@@ -233,7 +241,7 @@ class TranslationModel(object):
       logging.info('Input_Seq_Orig: %s'%input_seq_orig)
       logging.info('Input_Seq: %s' %input_seq)
     else:
-      rev_unk_map = None
+      rev_unk_map = orig_unk_map
       input_seq = input_sentence
 
     scores, num_comparisons = self.compute_scores(input_seq, work_buffer)
@@ -247,7 +255,68 @@ class TranslationModel(object):
 
     logging.info('Num candidates: %d'%len(scores))
     scores = sorted(scores, key=lambda t:t[0], reverse=True)[:k]
-    if generate_codes:
+    if rev_unk_map is not None:
       scores = [(score[0], replace_line(score[1], rev_unk_map)) for score in scores]
 
     return scores
+
+
+  def read_data(self, input_file, output_file, base_dir):
+    if base_dir is None:
+      base_dir = self.data_path
+
+    input_file_path = os.path.join(base_dir, input_file)
+    input_lines = codecs.open(input_file_path, 'r', 'utf-8').readlines()
+
+    orig_input_file_path = os.path.join(base_dir, '%s.%s'%(ORIG_PREFIX, input_file))
+    orig_input_lines = codecs.open(orig_input_file_path, 'r', 'utf-8').readlines()
+    assert len(input_lines) == len(orig_input_lines)
+
+    gold_file_path = os.path.join(base_dir, output_file)
+    gold_lines = codecs.open(gold_file_path, 'r', 'utf-8').readlines()
+
+    orig_gold_file_path = os.path.join(base_dir, '%s.%s' % (ORIG_PREFIX, output_file))
+    orig_gold_lines = codecs.open(orig_gold_file_path, 'r', 'utf-8').readlines()
+
+    assert len(gold_lines) == len(orig_gold_lines)
+    assert len(gold_lines) == len(input_lines)
+
+    return orig_input_lines, input_lines, orig_gold_lines, gold_lines
+
+
+  def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None):
+    orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
+
+    num_inputs = len(input_lines)
+    if num_lines > 0:
+      num_inputs = num_lines
+
+    logging.info('Num inputs: %d'%num_inputs)
+
+    fw_all_ref = codecs.open(ALL_REF, 'w', 'utf-8')
+    fw_all_hyp = codecs.open(ALL_HYP, 'w', 'utf-8')
+
+    perfect_matches = 0
+    for index in range(num_inputs):
+      unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
+      scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
+                                           orig_unk_map=unk_map, k=k, generate_codes=False)
+
+      # bleu_scores = [(get_bleu_score(orig_gold_lines[index], score[1]), score[0], score[1]) for score in scores]
+      bleu_scores = [get_bleu_score(orig_gold_lines[index], score[1]) for score in scores]
+      best_score_index = np.argmax(bleu_scores)
+      best_bleu_score = bleu_scores[best_score_index]
+
+      if best_bleu_score == 100.0:
+        perfect_matches += 1
+
+      logging.info('Line:%d Best_BLEU:%f(%d)'%(index, best_bleu_score, best_score_index))
+      fw_all_ref.write(orig_gold_lines[index].strip() + '\n')
+      fw_all_hyp.write(scores[best_score_index][1].strip() + '\n')
+
+    fw_all_ref.close()
+    fw_all_hyp.close()
+
+    bleu_score = execute_bleu_command(ALL_REF, ALL_HYP)
+    logging.info('Perfect Matches: %d/%d'%(perfect_matches, num_inputs))
+    return bleu_score
