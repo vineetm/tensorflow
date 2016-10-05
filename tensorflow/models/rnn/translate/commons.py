@@ -269,3 +269,20 @@ def generate_new_candidates(input_line):
       candidate = re.sub(unk1, unk2, q1)
       new_candidates.add(candidate)
   return new_candidates
+
+
+def convert_phrase(line):
+  tokens = line.split()
+  final_tokens = []
+  for token in tokens:
+    if token[0] in SYMBOL_START:
+      final_tokens.append(token)
+      continue
+
+    sub_tokens = token.split('_')
+    if len(sub_tokens) > 1:
+      final_tokens.extend(sub_tokens)
+    else:
+      final_tokens.append(token)
+
+  return ' '.join(final_tokens)

@@ -5,7 +5,7 @@ import numpy as np
 from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids
 from commons import get_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
-  get_rev_unk_map, fill_missing_symbols, generate_new_candidates, get_bleu_score, execute_bleu_command, get_unk_map
+  get_rev_unk_map, fill_missing_symbols, generate_new_candidates, get_bleu_score, execute_bleu_command, get_unk_map, convert_phrase
 from nltk.tokenize import word_tokenize as tokenizer
 from textblob.en.np_extractors import FastNPExtractor
 
@@ -14,7 +14,7 @@ from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV
 
 
 logging = tf.logging
-logging.set_verbosity(tf.logging.INFO)
+
 
 class PendingWork:
   def __init__(self, prob, tree, prefix):
@@ -27,10 +27,15 @@ class PendingWork:
 
 
 class TranslationModel(object):
-  def __init__(self, models_dir):
+  def __init__(self, models_dir, debug=False):
     config_file_path = os.path.join(models_dir, CONFIG_FILE)
-    logging.info('Loading Pre-trained seq2model:%s'%config_file_path)
+    if debug:
+      logging.set_verbosity(tf.logging.DEBUG)
+    else:
+      logging.set_verbosity(tf.logging.INFO)
+    self.debug = debug
 
+    logging.info('Loading Pre-trained seq2model:%s' % config_file_path)
     config = pkl.load(open(config_file_path))
     logging.info(config)
 
@@ -62,7 +67,7 @@ class TranslationModel(object):
       logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
       self.model.saver.restore(self.session, ckpt.model_checkpoint_path)
     else:
-      logging.info('Model not found!')
+      logging.error('Model not found!')
       return None
 
 
@@ -135,7 +140,7 @@ class TranslationModel(object):
   def set_output_tokens(self, output_token_ids, decoder_inputs):
     for index in range(len(output_token_ids)):
       if index + 1 >= len(decoder_inputs):
-        logging.info('Skip assignment Decoder_Size:%d Outputs_Size:%d'%(len(decoder_inputs), len(output_token_ids)))
+        logging.debug('Skip assignment Decoder_Size:%d Outputs_Size:%d'%(len(decoder_inputs), len(output_token_ids)))
         return
       decoder_inputs[index + 1] = np.array([output_token_ids[index]], dtype=np.float32)
 
@@ -250,15 +255,18 @@ class TranslationModel(object):
 
     if use_q1:
       new_candidates = generate_new_candidates(input_seq)
-      logging.info('New Q1 Candidates: %d'%len(new_candidates))
+      logging.debug('New Q1 Candidates: %d'%len(new_candidates))
       scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_candidates])
 
-    logging.info('Num candidates: %d'%len(scores))
+    logging.debug('Num candidates: %d'%len(scores))
     scores = sorted(scores, key=lambda t:t[0], reverse=True)[:k]
     if rev_unk_map is not None:
-      scores = [(score[0], replace_line(score[1], rev_unk_map)) for score in scores]
+      replaced_scores = [(score[0], replace_line(score[1], rev_unk_map)) for score in scores]
 
-    return scores
+    if orig_unk_map is None:
+      return replaced_scores
+    else:
+      return replaced_scores, scores
 
 
   def read_data(self, input_file, output_file, base_dir):
@@ -298,21 +306,37 @@ class TranslationModel(object):
 
     perfect_matches = 0
     for index in range(num_inputs):
+      gold_line = convert_phrase(orig_gold_lines[index].strip())
+
       unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
-      scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
+      scores, unk_scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
                                            orig_unk_map=unk_map, k=k, generate_codes=False)
 
-      # bleu_scores = [(get_bleu_score(orig_gold_lines[index], score[1]), score[0], score[1]) for score in scores]
-      bleu_scores = [get_bleu_score(orig_gold_lines[index], score[1]) for score in scores]
+      bleu_scores = [get_bleu_score(gold_line, convert_phrase(score[1])) for score in scores]
       best_score_index = np.argmax(bleu_scores)
       best_bleu_score = bleu_scores[best_score_index]
+      hyp_line = convert_phrase(scores[best_score_index][1].strip())
 
       if best_bleu_score == 100.0:
         perfect_matches += 1
 
       logging.info('Line:%d Best_BLEU:%f(%d)'%(index, best_bleu_score, best_score_index))
-      fw_all_ref.write(orig_gold_lines[index].strip() + '\n')
-      fw_all_hyp.write(scores[best_score_index][1].strip() + '\n')
+      fw_all_ref.write(gold_line + '\n')
+      fw_all_hyp.write(hyp_line + '\n')
+
+      if self.debug:
+        logging.debug('Input: %s'%orig_input_lines[index].strip())
+        logging.debug('Input_UNK: %s' % input_lines[index].strip())
+        logging.debug('')
+        logging.debug('Gold: %s'%orig_gold_lines[index].strip())
+        logging.debug('Gold_UNK: %s' % gold_lines[index].strip())
+        logging.debug('')
+        logging.debug('UNK_Map: %s'%str(unk_map))
+
+        for score_index in range(len(scores)):
+          logging.debug('C: %s B:%f Seq:%f'%(scores[score_index][1], bleu_scores[score_index], scores[score_index][0]))
+          logging.debug('C_UNK: %s' %unk_scores[score_index][1])
+          logging.debug('')
 
     fw_all_ref.close()
     fw_all_hyp.close()
