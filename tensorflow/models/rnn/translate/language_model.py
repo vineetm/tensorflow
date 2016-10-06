@@ -135,25 +135,12 @@ class LanguageModel(object):
     return self._initial_state
 
   @property
-  def cost(self):
-    if self.is_decoder:
-      return None
-    return self._cost
-
-  @property
   def final_state(self):
     return self._final_state
 
   @property
   def lr(self):
     return self._lr
-
-  @property
-  def train_op(self):
-    if self.is_decoder:
-      return None
-    return self._train_op
-
 
 class LargeConfig(object):
   """Large config."""
