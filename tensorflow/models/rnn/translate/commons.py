@@ -24,6 +24,8 @@ DEV_OUTPUT = '%s.%s'%(DEV, OUTPUT_SUFFIX)
 ALL_REF = 'all_ref.txt'
 ALL_HYP = 'all_hyp.txt'
 
+LM_VOCAB_FILE = 'vocab.pkl'
+
 from nltk.corpus import stopwords
 
 

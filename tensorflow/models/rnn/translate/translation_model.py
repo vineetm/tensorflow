@@ -1,4 +1,4 @@
-import os, codecs, numpy as np
+import os, codecs, argparse
 import tensorflow as tf
 import cPickle as pkl
 import numpy as np
@@ -343,4 +343,20 @@ class TranslationModel(object):
 
     bleu_score = execute_bleu_command(ALL_REF, ALL_HYP)
     logging.info('Perfect Matches: %d/%d'%(perfect_matches, num_inputs))
-    return bleu_score
+    return bleu_score, perfect_matches
+
+
+def setup_args():
+  parser = argparse.ArgumentParser()
+  parser.add_argument('model_dir', help='Trained Model Directory')
+  parser.add_argument('-k', default=100, type=int, help='# of candidates')
+  parser.add_argument('-debug', dest='debug', default=False, action='store_true')
+  args = parser.parse_args()
+  return args
+
+if __name__ == '__main__':
+    args = setup_args()
+    tm = TranslationModel(args.model_dir, debug=args.debug)
+    logging.info(args)
+    bleu, perfect_matches = tm.compute_bleu(k=args.k)
+    logging.info('BLEU: %f Perfect: %d'%(bleu, perfect_matches))
