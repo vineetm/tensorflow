@@ -125,12 +125,6 @@ class LanguageModel(object):
     return self._input_data
 
   @property
-  def targets(self):
-    if self.is_decoder:
-      return None
-    return self._targets
-
-  @property
   def initial_state(self):
     return self._initial_state
 
@@ -138,9 +132,6 @@ class LanguageModel(object):
   def final_state(self):
     return self._final_state
 
-  @property
-  def lr(self):
-    return self._lr
 
 class LargeConfig(object):
   """Large config."""
