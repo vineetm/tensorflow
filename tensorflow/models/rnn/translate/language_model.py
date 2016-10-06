@@ -76,25 +76,21 @@ class LanguageModel(object):
     size = config.hidden_size
     vocab_size = config.vocab_size
 
-    gpu_device = '/cpu:0'
     self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
 
     # Slightly better results can be obtained with forget gate biases
     # initialized to 1 but the hyperparameters of the model would need to be
     # different than reported in the paper.
 
-    gpu_device_name = '%s' % gpu_device
-    logging.info('GPU Device: %s' % gpu_device_name)
-    with tf.device(gpu_device_name):
-      lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
-      cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
+    lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
+    cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
 
-      self._initial_state = cell.zero_state(batch_size, data_type())
+    self._initial_state = cell.zero_state(batch_size, data_type())
 
-    with tf.device("/cpu:0"):
-      embedding = tf.get_variable(
+
+    embedding = tf.get_variable(
         "embedding", [vocab_size, size], dtype=data_type())
-      inputs = tf.nn.embedding_lookup(embedding, self._input_data)
+    inputs = tf.nn.embedding_lookup(embedding, self._input_data)
 
     # Simplified version of tensorflow.models.rnn.rnn.py's rnn().
     # This builds an unrolled LSTM for tutorial purposes only.
@@ -108,18 +104,18 @@ class LanguageModel(object):
     # outputs, state = rnn.rnn(cell, inputs, initial_state=self._initial_state)
     outputs = []
     state = self._initial_state
-    with tf.device(gpu_device_name), tf.variable_scope("RNN"):
+    with tf.variable_scope("RNN"):
       for time_step in range(num_steps):
         if time_step > 0: tf.get_variable_scope().reuse_variables()
         (cell_output, state) = cell(inputs[:, time_step, :], state)
         outputs.append(cell_output)
 
-    with tf.device(gpu_device_name):
-      output = tf.reshape(tf.concat(1, outputs), [-1, size])
-      softmax_w = tf.get_variable(
+
+    output = tf.reshape(tf.concat(1, outputs), [-1, size])
+    softmax_w = tf.get_variable(
         "softmax_w", [size, vocab_size], dtype=data_type())
-      softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
-      logits = tf.matmul(output, softmax_w) + softmax_b
+    softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
+    logits = tf.matmul(output, softmax_w) + softmax_b
 
     self.probs = tf.nn.softmax(logits)
     self._final_state = state
