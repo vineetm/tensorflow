@@ -57,7 +57,8 @@ from __future__ import division
 from __future__ import print_function
 
 from commons import LM_VOCAB_FILE
-import tensorflow as tf
+import tensorflow as tf, os, cPickle as pkl, numpy as np
+from nltk.tokenize import word_tokenize as tokenizer
 
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
@@ -65,60 +66,94 @@ logging.set_verbosity(tf.logging.INFO)
 def data_type():
   return tf.float32
 
+class LargeConfig(object):
+  """Large config."""
+  init_scale = 0.04
+  learning_rate = 1.0
+  max_grad_norm = 10
+  num_layers = 2
+  num_steps = 1
+  hidden_size = 1500
+  max_epoch = 14
+  max_max_epoch = 55
+  keep_prob = 0.35
+  lr_decay = 1 / 1.15
+  batch_size = 1
+  vocab_size = 30002
+  max_len = 50
+
 class LanguageModel(object):
   """The PTB model."""
 
-  def __init__(self, config):
-    self.batch_size = batch_size = config.batch_size
-    self.num_steps = num_steps = config.num_steps
-    self.is_decoder = True
-
-    size = config.hidden_size
-    vocab_size = config.vocab_size
-
-    self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
-
-    # Slightly better results can be obtained with forget gate biases
-    # initialized to 1 but the hyperparameters of the model would need to be
-    # different than reported in the paper.
-
-    lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
-    cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
-
-    self._initial_state = cell.zero_state(batch_size, data_type())
+  def generate_id_to_word(self):
+    id_to_word = {}
+    for word in self.word_to_id:
+      id_to_word[self.word_to_id[word]] = word
+    self.id_to_word = id_to_word
 
 
-    embedding = tf.get_variable(
-        "embedding", [vocab_size, size], dtype=data_type())
-    inputs = tf.nn.embedding_lookup(embedding, self._input_data)
+  def __init__(self, data_path, model_path, config=LargeConfig):
+    initializer = tf.random_uniform_initializer(-config.init_scale,
+                                                config.init_scale)
 
-    # Simplified version of tensorflow.models.rnn.rnn.py's rnn().
-    # This builds an unrolled LSTM for tutorial purposes only.
-    # In general, use the rnn() or state_saving_rnn() from rnn.py.
-    #
-    # The alternative version of the code below is:
-    #
-    # from tensorflow.models.rnn import rnn
-    # inputs = [tf.squeeze(input_, [1])
-    #           for input_ in tf.split(1, num_steps, inputs)]
-    # outputs, state = rnn.rnn(cell, inputs, initial_state=self._initial_state)
-    outputs = []
-    state = self._initial_state
-    with tf.variable_scope("RNN"):
-      for time_step in range(num_steps):
-        if time_step > 0: tf.get_variable_scope().reuse_variables()
-        (cell_output, state) = cell(inputs[:, time_step, :], state)
-        outputs.append(cell_output)
+    vocab_file = os.path.join(data_path, 'vocab.pkl')
+    self.word_to_id = pkl.load(open(vocab_file, 'rb'))
+    self.generate_id_to_word()
+    logging.info('Vocab Size: %d' % len(self.word_to_id))
+
+    with tf.variable_scope("model", reuse=None, initializer=initializer):
+      self.batch_size = batch_size = config.batch_size
+      self.num_steps = num_steps = config.num_steps
+      self.is_decoder = True
+
+      size = config.hidden_size
+      vocab_size = config.vocab_size
+
+      self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
+
+      # Slightly better results can be obtained with forget gate biases
+      # initialized to 1 but the hyperparameters of the model would need to be
+      # different than reported in the paper.
+
+      lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
+      cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
+
+      self._initial_state = cell.zero_state(batch_size, data_type())
+      embedding = tf.get_variable(
+          "embedding", [vocab_size, size], dtype=data_type())
+      inputs = tf.nn.embedding_lookup(embedding, self._input_data)
+
+      # Simplified version of tensorflow.models.rnn.rnn.py's rnn().
+      # This builds an unrolled LSTM for tutorial purposes only.
+      # In general, use the rnn() or state_saving_rnn() from rnn.py.
+      #
+      # The alternative version of the code below is:
+      #
+      # from tensorflow.models.rnn import rnn
+      # inputs = [tf.squeeze(input_, [1])
+      #           for input_ in tf.split(1, num_steps, inputs)]
+      # outputs, state = rnn.rnn(cell, inputs, initial_state=self._initial_state)
+      outputs = []
+      state = self._initial_state
+      with tf.variable_scope("RNN"):
+        for time_step in range(num_steps):
+          if time_step > 0: tf.get_variable_scope().reuse_variables()
+          (cell_output, state) = cell(inputs[:, time_step, :], state)
+          outputs.append(cell_output)
 
 
-    output = tf.reshape(tf.concat(1, outputs), [-1, size])
-    softmax_w = tf.get_variable(
-        "softmax_w", [size, vocab_size], dtype=data_type())
-    softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
-    logits = tf.matmul(output, softmax_w) + softmax_b
+      output = tf.reshape(tf.concat(1, outputs), [-1, size])
+      softmax_w = tf.get_variable(
+          "softmax_w", [size, vocab_size], dtype=data_type())
+      softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
+      logits = tf.matmul(output, softmax_w) + softmax_b
 
-    self.probs = tf.nn.softmax(logits)
-    self._final_state = state
+      self.probs = tf.nn.softmax(logits)
+      self._final_state = state
+
+    self.session = tf.Session()
+    saver = tf.train.Saver()
+    saver.restore(self.session, model_path)
 
   @property
   def input_data(self):
@@ -133,17 +168,27 @@ class LanguageModel(object):
     return self._final_state
 
 
-class LargeConfig(object):
-  """Large config."""
-  init_scale = 0.04
-  learning_rate = 1.0
-  max_grad_norm = 10
-  num_layers = 2
-  num_steps = 35
-  hidden_size = 1500
-  max_epoch = 14
-  max_max_epoch = 55
-  keep_prob = 0.35
-  lr_decay = 1 / 1.15
-  batch_size = 20
-  vocab_size = 30002
+  def compute_prob(self, sentence):
+    # Lower case, tokenize, generate token #s
+    sentence = sentence.lower()
+    sentence = '<eos> ' + sentence
+    tokens = tokenizer(sentence)
+    token_ids = [self.word_to_id[token] if token in self.word_to_id
+                 else self.word_to_id['_UNK']
+                 for token in tokens]
+
+    state = self.session.run(self.initial_state)
+    total_prob = 1.0
+    for index, token_id in enumerate(token_ids):
+      if index == len(token_ids) - 1:
+        return total_prob / len(token_ids)
+
+      fetches = [self.probs, self.final_state]
+
+      feed_dict = {}
+      x = np.array([[token_id]])
+      feed_dict[self.input_data] = x
+      feed_dict[self.initial_state] = state
+
+      probs, state = self.session.run(fetches, feed_dict)
+      total_prob += probs[0][token_ids[index + 1]]
