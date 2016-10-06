@@ -68,18 +68,16 @@ def data_type():
 class LanguageModel(object):
   """The PTB model."""
 
-  def __init__(self, config, is_training=False, is_decoder=True):
+  def __init__(self, config):
     self.batch_size = batch_size = config.batch_size
     self.num_steps = num_steps = config.num_steps
+    self.is_decoder = True
+
     size = config.hidden_size
     vocab_size = config.vocab_size
 
     gpu_device = '/cpu:0'
-    self.is_decoder = is_decoder
     self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
-
-    if not is_decoder:
-      self._targets = tf.placeholder(tf.int32, [batch_size, num_steps])
 
     # Slightly better results can be obtained with forget gate biases
     # initialized to 1 but the hyperparameters of the model would need to be
@@ -89,9 +87,6 @@ class LanguageModel(object):
     logging.info('GPU Device: %s' % gpu_device_name)
     with tf.device(gpu_device_name):
       lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
-      if is_training and config.keep_prob < 1:
-        lstm_cell = tf.nn.rnn_cell.DropoutWrapper(
-          lstm_cell, output_keep_prob=config.keep_prob)
       cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
 
       self._initial_state = cell.zero_state(batch_size, data_type())
@@ -100,9 +95,6 @@ class LanguageModel(object):
       embedding = tf.get_variable(
         "embedding", [vocab_size, size], dtype=data_type())
       inputs = tf.nn.embedding_lookup(embedding, self._input_data)
-
-    if is_training and config.keep_prob < 1:
-      inputs = tf.nn.dropout(inputs, config.keep_prob)
 
     # Simplified version of tensorflow.models.rnn.rnn.py's rnn().
     # This builds an unrolled LSTM for tutorial purposes only.
@@ -129,35 +121,8 @@ class LanguageModel(object):
       softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
       logits = tf.matmul(output, softmax_w) + softmax_b
 
-    if is_decoder:
-      self.probs = tf.nn.softmax(logits)
-
+    self.probs = tf.nn.softmax(logits)
     self._final_state = state
-
-    if is_decoder:
-      return
-
-    with tf.device(gpu_device_name):
-      loss = tf.nn.seq2seq.sequence_loss_by_example(
-        [logits],
-        [tf.reshape(self._targets, [-1])],
-        [tf.ones([batch_size * num_steps], dtype=data_type())])
-      self._cost = cost = tf.reduce_sum(loss) / batch_size
-
-    if not is_training:
-      return
-
-    with tf.device(gpu_device_name):
-      self._lr = tf.Variable(0.0, trainable=False)
-      tvars = tf.trainable_variables()
-      grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
-                                        config.max_grad_norm)
-      optimizer = tf.train.GradientDescentOptimizer(self._lr)
-      self._train_op = optimizer.apply_gradients(zip(grads, tvars))
-
-      self._new_lr = tf.placeholder(
-        tf.float32, shape=[], name="new_learning_rate")
-      self._lr_update = tf.assign(self._lr, self._new_lr)
 
   @property
   def input_data(self):
