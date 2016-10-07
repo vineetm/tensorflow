@@ -146,9 +146,9 @@ class LanguageModel(object):
       softmax_w = tf.get_variable(
           "softmax_w", [size, vocab_size], dtype=data_type())
       softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
-      logits = tf.matmul(output, softmax_w) + softmax_b
+      self.logits = tf.matmul(output, softmax_w) + softmax_b
 
-      self.probs = tf.nn.softmax(logits)
+      # self.probs = tf.nn.softmax(logits)
       self._final_state = state
 
     self.session = tf.Session()
@@ -167,28 +167,33 @@ class LanguageModel(object):
   def final_state(self):
     return self._final_state
 
+  def compute_fraction(self, logit, index):
+    return np.exp(logit[index]) / np.sum(np.exp(logit))
 
   def compute_prob(self, sentence):
     # Lower case, tokenize, generate token #s
     sentence = sentence.lower()
-    sentence = '<eos> ' + sentence
     tokens = tokenizer(sentence)
     token_ids = [self.word_to_id[token] if token in self.word_to_id
                  else self.word_to_id['_UNK']
                  for token in tokens]
+    token_ids.insert(0, self.word_to_id['<eos>'])
 
     state = self.session.run(self.initial_state)
-    total_prob = 1.0
-    for index, token_id in enumerate(token_ids):
-      if index == len(token_ids) - 1:
-        return total_prob / len(token_ids)
+    total_prob = 0.0
 
-      fetches = [self.probs, self.final_state]
+    feed_dict = {}
+    for index in range(len(token_ids) - 1):
+      fetches = [self.logits, self.final_state]
 
-      feed_dict = {}
-      x = np.array([[token_id]])
-      feed_dict[self.input_data] = x
+      #Setup feed_dict
+      current_token = token_ids[index]
+      next_token = token_ids[index +1]
+      feed_dict[self.input_data] = np.array([[current_token]])
       feed_dict[self.initial_state] = state
 
-      probs, state = self.session.run(fetches, feed_dict)
-      total_prob += probs[0][token_ids[index + 1]]
+      logits, state = self.session.run(fetches, feed_dict)
+      prob = self.compute_fraction(logits[0], next_token)
+      total_prob += prob
+
+    return total_prob / (len(token_ids) - 1)
