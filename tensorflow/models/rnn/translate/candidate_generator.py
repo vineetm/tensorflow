@@ -26,7 +26,7 @@ class PendingWork:
     return 'Str=%s(%f)'%(self.prefix, self.prob)
 
 
-class TranslationModel(object):
+class CandidateGenerator(object):
   def __init__(self, models_dir, debug=False):
     config_file_path = os.path.join(models_dir, CONFIG_FILE)
     if debug:
@@ -356,7 +356,7 @@ def setup_args():
 
 if __name__ == '__main__':
     args = setup_args()
-    tm = TranslationModel(args.model_dir, debug=args.debug)
+    tm = CandidateGenerator(args.model_dir, debug=args.debug)
     logging.info(args)
     bleu, perfect_matches = tm.compute_bleu(k=args.k)
     logging.info('BLEU: %f Perfect: %d'%(bleu, perfect_matches))
