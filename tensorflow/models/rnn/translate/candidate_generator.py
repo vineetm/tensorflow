@@ -10,7 +10,8 @@ from nltk.tokenize import word_tokenize as tokenizer
 from textblob.en.np_extractors import FastNPExtractor
 
 #Constants
-from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV_OUTPUT, ORIG_PREFIX, ALL_HYP, ALL_REF
+from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV_OUTPUT, ORIG_PREFIX, \
+  ALL_HYP, ALL_REF, CANDIDATES_SUFFIX
 
 
 logging = tf.logging
@@ -292,6 +293,34 @@ class CandidateGenerator(object):
     return orig_input_lines, input_lines, orig_gold_lines, gold_lines
 
 
+  def save_best_results(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None):
+    orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
+    num_inputs = len(input_lines)
+    if num_lines > 0:
+      num_inputs = num_lines
+
+    if base_dir is None:
+      base_dir = self.data_path
+
+    results_file_path = os.path.join(base_dir, '%s.%s'%(output_file, CANDIDATES_SUFFIX))
+    results = []
+    logging.info('Num inputs: %d' % num_inputs)
+
+    for index in range(num_inputs):
+
+      unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
+      scores, unk_scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
+                                                       orig_unk_map=unk_map, k=k, generate_codes=False)
+
+      scores = [(score[0], convert_phrase(score[1])) for score in scores]
+      results.append(scores)
+
+      if index %10== 0:
+        logging.info('Processed %d inputs'%index)
+
+    pkl.dump(results, open(results_file_path, 'w'))
+
+
   def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None):
     orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
 
@@ -301,8 +330,8 @@ class CandidateGenerator(object):
 
     logging.info('Num inputs: %d'%num_inputs)
 
-    fw_all_ref = codecs.open(ALL_REF, 'w', 'utf-8')
     fw_all_hyp = codecs.open(ALL_HYP, 'w', 'utf-8')
+    fw_all_ref = codecs.open(ALL_REF, 'w', 'utf-8')
 
     perfect_matches = 0
     for index in range(num_inputs):
@@ -358,5 +387,4 @@ if __name__ == '__main__':
     args = setup_args()
     tm = CandidateGenerator(args.model_dir, debug=args.debug)
     logging.info(args)
-    bleu, perfect_matches = tm.compute_bleu(k=args.k)
-    logging.info('BLEU: %f Perfect: %d'%(bleu, perfect_matches))
+    tm.save_best_results()

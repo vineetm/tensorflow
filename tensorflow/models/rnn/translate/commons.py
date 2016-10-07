@@ -2,6 +2,7 @@ from collections import OrderedDict
 import codecs, re, commands
 from itertools import permutations
 
+
 LEAVES='_LEAVES_'
 SUBTREE='_SUBTREE_'
 CONFIG_FILE = 'config.ckpt'
@@ -24,6 +25,7 @@ DEV_OUTPUT = '%s.%s'%(DEV, OUTPUT_SUFFIX)
 ALL_REF = 'all_ref.txt'
 ALL_HYP = 'all_hyp.txt'
 
+CANDIDATES_SUFFIX = 'candidates.pkl'
 LM_VOCAB_FILE = 'vocab.pkl'
 
 from nltk.corpus import stopwords
