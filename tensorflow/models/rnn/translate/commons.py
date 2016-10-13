@@ -27,6 +27,8 @@ ALL_HYP = 'all_hyp.txt'
 
 CANDIDATES_SUFFIX = 'candidates.pkl'
 LM_SCORES_SUFFIX = 'lm.scores.pkl'
+FINAL_SCORES_SUFFIX = 'final.scores.pkl'
+
 LM_VOCAB_FILE = 'vocab.pkl'
 
 from nltk.corpus import stopwords
