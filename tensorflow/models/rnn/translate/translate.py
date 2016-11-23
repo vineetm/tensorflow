@@ -82,6 +82,9 @@ _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
 # _buckets = [(10, 10), (20, 20), (30, 25), (40, 25)]
 #_buckets = [(10, 10), (20, 20), (30, 25), (40, 25)]
 
+def space_tokenizer(sentence):
+  return sentence.split()
+
 def read_data(source_path, target_path, max_size=None):
   """Read data from source and target files and put into buckets.
 
@@ -176,7 +179,7 @@ def train():
   print("Preparing WMT data in %s" % FLAGS.data_dir)
 
   en_train, fr_train, en_dev, fr_dev, _, _ = prepare_nsu_data(
-    FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
+    FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size, tokenizer=space_tokenizer, normalize_digits=True)
 
   # # Device Placemement options
   # cf = tf.ConfigProto()

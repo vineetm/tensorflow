@@ -270,6 +270,11 @@ class CandidateGenerator(object):
       return replaced_scores, scores
 
 
+  def get_vanila_candidates(self, input_sentence, work_buffer=5, k=100):
+    scores, num_comparisons = self.compute_scores(input_sentence, work_buffer)
+    scores = sorted(scores, key=lambda t: t[0], reverse=True)[:k]
+    return scores
+
   def read_data(self, input_file, output_file, base_dir):
     if base_dir is None:
       base_dir = self.data_path

@@ -242,27 +242,29 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
           tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
 
-def prepare_nsu_data(data_dir, en_vocabulary_size, fr_vocabulary_size, tokenizer=None):
+def prepare_nsu_data(data_dir, en_vocabulary_size, fr_vocabulary_size, tokenizer, normalize_digits=False):
+
   train_path = os.path.join(data_dir, 'data.train')
   dev_path = os.path.join(data_dir, 'data.dev')
+
 
   # Create vocabularies of the appropriate sizes.
   fr_vocab_path = os.path.join(data_dir, "vocab%d.fr" % fr_vocabulary_size)
   en_vocab_path = os.path.join(data_dir, "vocab%d.en" % en_vocabulary_size)
-  create_vocabulary(fr_vocab_path, train_path + ".fr", fr_vocabulary_size, tokenizer, normalize_digits=False)
-  create_vocabulary(en_vocab_path, train_path + ".en", en_vocabulary_size, tokenizer, normalize_digits=False)
+  create_vocabulary(fr_vocab_path, train_path + ".fr", fr_vocabulary_size, tokenizer, normalize_digits=normalize_digits)
+  create_vocabulary(en_vocab_path, train_path + ".en", en_vocabulary_size, tokenizer, normalize_digits=normalize_digits)
 
   # Create token ids for the training data.
   fr_train_ids_path = train_path + (".ids%d.fr" % fr_vocabulary_size)
   en_train_ids_path = train_path + (".ids%d.en" % en_vocabulary_size)
-  data_to_token_ids(train_path + ".fr", fr_train_ids_path, fr_vocab_path, tokenizer, normalize_digits=False)
-  data_to_token_ids(train_path + ".en", en_train_ids_path, en_vocab_path, tokenizer, normalize_digits=False)
+  data_to_token_ids(train_path + ".fr", fr_train_ids_path, fr_vocab_path, tokenizer, normalize_digits=normalize_digits)
+  data_to_token_ids(train_path + ".en", en_train_ids_path, en_vocab_path, tokenizer, normalize_digits=normalize_digits)
 
   # Create token ids for the development data.
   fr_dev_ids_path = dev_path + (".ids%d.fr" % fr_vocabulary_size)
   en_dev_ids_path = dev_path + (".ids%d.en" % en_vocabulary_size)
-  data_to_token_ids(dev_path + ".fr", fr_dev_ids_path, fr_vocab_path, tokenizer, normalize_digits=False)
-  data_to_token_ids(dev_path + ".en", en_dev_ids_path, en_vocab_path, tokenizer, normalize_digits=False)
+  data_to_token_ids(dev_path + ".fr", fr_dev_ids_path, fr_vocab_path, tokenizer, normalize_digits=normalize_digits)
+  data_to_token_ids(dev_path + ".en", en_dev_ids_path, en_vocab_path, tokenizer, normalize_digits=normalize_digits)
 
   return (en_train_ids_path, fr_train_ids_path,
           en_dev_ids_path, fr_dev_ids_path,
