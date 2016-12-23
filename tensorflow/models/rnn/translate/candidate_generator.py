@@ -4,8 +4,9 @@ import cPickle as pkl
 import numpy as np
 from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids
-from commons import get_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
-  get_rev_unk_map, fill_missing_symbols, generate_new_candidates, get_bleu_score, execute_bleu_command, get_unk_map, convert_phrase
+from commons import read_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
+  get_rev_unk_map, fill_missing_symbols, generate_new_candidates, get_bleu_score, execute_bleu_command, \
+    get_unk_map, convert_phrase, STOPW_FILE
 from nltk.tokenize import word_tokenize as tokenizer
 from textblob.en.np_extractors import FastNPExtractor
 
@@ -47,8 +48,8 @@ class CandidateGenerator(object):
     self.target_vocab_size = config['target_vocab_size']
     self._buckets = config['_buckets']
     self.np_ex = FastNPExtractor()
-    self.stopw = get_stopw()
-    logging.info('Stopw: %d'%len(self.stopw))
+    #self.stopw = get_stopw()
+
 
     self.model = Seq2SeqModel(
       source_vocab_size = config['src_vocab_size'],
@@ -81,6 +82,8 @@ class CandidateGenerator(object):
     self.en_vocab, _ = initialize_vocabulary(en_vocab_path)
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
+    self.stopw = read_stopw(os.path.join(self.data_path,  STOPW_FILE))
+    logging.info('Stopw: %d' % len(self.stopw))
     #Read Candidates and build a prefix tree
     self.build_prefix_tree()
     logging.info('Prefix Tree Leaves:%d' % len(self.prefix_tree[LEAVES]))
@@ -384,6 +387,7 @@ def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('model_dir', help='Trained Model Directory')
   parser.add_argument('-k', default=100, type=int, help='# of candidates')
+  parser.add_argument('-l', default=-1, type=int, help='# of candidates')
   parser.add_argument('-debug', dest='debug', default=False, action='store_true')
   args = parser.parse_args()
   return args
@@ -392,4 +396,6 @@ if __name__ == '__main__':
     args = setup_args()
     tm = CandidateGenerator(args.model_dir, debug=args.debug)
     logging.info(args)
-    tm.save_best_results()
+    #tm.save_best_results()
+    bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k)
+    logging.info('BLEU: %f Perfect Matches: %d'%(bleu, perfect_matches))
