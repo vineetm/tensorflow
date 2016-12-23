@@ -257,13 +257,14 @@ class CandidateGenerator(object):
     if missing:
       scores = fill_missing_symbols(scores, rev_unk_map)
 
+    scores = scores[:k]
     if use_q1:
       new_candidates = generate_new_candidates(input_seq)
       logging.debug('New Q1 Candidates: %d'%len(new_candidates))
       scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_candidates])
 
-    logging.debug('Num candidates: %d'%len(scores))
-    scores = sorted(scores, key=lambda t:t[0], reverse=True)[:k]
+    logging.info('Num candidates: %d'%len(scores))
+    scores = sorted(scores, key=lambda t:t[0], reverse=True)
     if rev_unk_map is not None:
       replaced_scores = [(score[0], replace_line(score[1], rev_unk_map)) for score in scores]
 
@@ -329,7 +330,7 @@ class CandidateGenerator(object):
     pkl.dump(results, open(results_file_path, 'w'))
 
 
-  def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None):
+  def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None, use_q1=True):
     orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
 
     num_inputs = len(input_lines)
@@ -347,7 +348,7 @@ class CandidateGenerator(object):
 
       unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
       scores, unk_scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
-                                           orig_unk_map=unk_map, k=k, generate_codes=False)
+                                           orig_unk_map=unk_map, k=k, generate_codes=False, use_q1=use_q1)
 
       bleu_scores = [get_bleu_score(gold_line, convert_phrase(score[1])) for score in scores]
       best_score_index = np.argmax(bleu_scores)
@@ -389,6 +390,7 @@ def setup_args():
   parser.add_argument('-k', default=100, type=int, help='# of candidates')
   parser.add_argument('-l', default=-1, type=int, help='# of candidates')
   parser.add_argument('-debug', dest='debug', default=False, action='store_true')
+  parser.add_argument('-no_q1', dest='no_q1', default=False, action='store_true')
   args = parser.parse_args()
   return args
 
@@ -397,5 +399,5 @@ if __name__ == '__main__':
     tm = CandidateGenerator(args.model_dir, debug=args.debug)
     logging.info(args)
     #tm.save_best_results()
-    bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k)
+    bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k, use_q1 = not args.no_q1)
     logging.info('BLEU: %f Perfect Matches: %d'%(bleu, perfect_matches))
