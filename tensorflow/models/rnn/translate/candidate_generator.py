@@ -159,8 +159,13 @@ class CandidateGenerator(object):
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(sentence), self.en_vocab, normalize_digits=False)
     output_token_ids = sentence_to_token_ids(tf.compat.as_bytes(output_sentence), self.fr_vocab, normalize_digits=False)
 
-    bucket_id = min([b for b in xrange(len(self._buckets))
-                     if self._buckets[b][0] > len(token_ids)])
+    bucket_ids = [b for b in xrange(len(self._buckets))
+                     if self._buckets[b][0] > len(token_ids)]
+
+    if len(bucket_ids) == 0:
+        bucket_id = len(self._buckets) - 1
+    else:
+        bucket_id = min(bucket_ids)
 
     encoder_inputs, decoder_inputs, target_weights = self.model.get_batch(
       {bucket_id: [(token_ids, [])]}, bucket_id)
@@ -253,14 +258,19 @@ class CandidateGenerator(object):
       rev_unk_map = orig_unk_map
       input_seq = input_sentence
 
+    logging.info('Input Seq len: %d'%len(input_seq))
     scores, num_comparisons = self.compute_scores(input_seq, work_buffer)
     if missing:
       scores = fill_missing_symbols(scores, rev_unk_map)
 
+    logging.info('Num Scores: %d'%len(scores))
     scores = scores[:k]
     if use_q1:
       new_candidates = generate_new_candidates(input_seq)
       logging.debug('New Q1 Candidates: %d'%len(new_candidates))
+      if len(scores) == 0 and len(new_candidates) == 0:
+          return [], []
+
       scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_candidates])
 
     logging.info('Num candidates: %d'%len(scores))
@@ -331,57 +341,64 @@ class CandidateGenerator(object):
 
 
   def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None, use_q1=True):
-    orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
+      orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
 
-    num_inputs = len(input_lines)
-    if num_lines > 0:
-      num_inputs = num_lines
+      num_inputs = len(input_lines)
+      if num_lines > 0:
+          num_inputs = num_lines
 
-    logging.info('Num inputs: %d'%num_inputs)
+      logging.info('Num inputs: %d'%num_inputs)
 
-    fw_all_hyp = codecs.open(ALL_HYP, 'w', 'utf-8')
-    fw_all_ref = codecs.open(ALL_REF, 'w', 'utf-8')
+      fw_all_hyp = codecs.open(ALL_HYP, 'w', 'utf-8')
+      fw_all_ref = codecs.open(ALL_REF, 'w', 'utf-8')
 
-    perfect_matches = 0
-    for index in range(num_inputs):
-      gold_line = convert_phrase(orig_gold_lines[index].strip())
+      perfect_matches = 0
+      for index in range(num_inputs):
+          gold_line = convert_phrase(orig_gold_lines[index].strip())
 
-      unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
-      scores, unk_scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
-                                           orig_unk_map=unk_map, k=k, generate_codes=False, use_q1=use_q1)
+          unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
+          scores, unk_scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
+                                                           orig_unk_map=unk_map, k=k, generate_codes=False, use_q1=use_q1)
 
-      bleu_scores = [get_bleu_score(gold_line, convert_phrase(score[1])) for score in scores]
-      best_score_index = np.argmax(bleu_scores)
-      best_bleu_score = bleu_scores[best_score_index]
-      hyp_line = convert_phrase(scores[best_score_index][1].strip())
+          if len(scores) == 0:
+              logging.info('No candidates, Skip: %d'%index)
+              continue
 
-      if best_bleu_score == 100.0:
-        perfect_matches += 1
+          bleu_scores = [get_bleu_score(gold_line, convert_phrase(score[1])) for score in scores]
 
-      logging.info('Line:%d Best_BLEU:%f(%d)'%(index, best_bleu_score, best_score_index))
-      fw_all_ref.write(gold_line + '\n')
-      fw_all_hyp.write(hyp_line + '\n')
+          best_score_index = np.argmax(bleu_scores)
+          best_bleu_score = bleu_scores[best_score_index]
+          hyp_line = convert_phrase(scores[best_score_index][1].strip())
 
-      if self.debug:
-        logging.debug('Input: %s'%orig_input_lines[index].strip())
-        logging.debug('Input_UNK: %s' % input_lines[index].strip())
-        logging.debug('')
-        logging.debug('Gold: %s'%orig_gold_lines[index].strip())
-        logging.debug('Gold_UNK: %s' % gold_lines[index].strip())
-        logging.debug('')
-        logging.debug('UNK_Map: %s'%str(unk_map))
+          if best_bleu_score == 100.0:
+              perfect_matches += 1
 
-        for score_index in range(len(scores)):
-          logging.debug('C: %s B:%f Seq:%f'%(scores[score_index][1], bleu_scores[score_index], scores[score_index][0]))
-          logging.debug('C_UNK: %s' %unk_scores[score_index][1])
-          logging.debug('')
 
-    fw_all_ref.close()
-    fw_all_hyp.close()
+          fw_all_ref.write(gold_line + '\n')
+          fw_all_hyp.write(hyp_line + '\n')
 
-    bleu_score = execute_bleu_command(ALL_REF, ALL_HYP)
-    logging.info('Perfect Matches: %d/%d'%(perfect_matches, num_inputs))
-    return bleu_score, perfect_matches
+          if self.debug:
+              logging.debug('Input: %s'%orig_input_lines[index].strip())
+              logging.debug('Input_UNK: %s' % input_lines[index].strip())
+              logging.debug('')
+              logging.debug('Gold: %s'%orig_gold_lines[index].strip())
+              logging.debug('Gold_UNK: %s' % gold_lines[index].strip())
+              logging.debug('')
+              logging.debug('UNK_Map: %s'%str(unk_map))
+
+              for score_index in range(len(scores)):
+                  logging.debug('C: %s B:%f Seq:%f'%(scores[score_index][1], bleu_scores[score_index], scores[score_index][0]))
+                  logging.debug('C_UNK: %s' %unk_scores[score_index][1])
+                  logging.debug('')
+
+          logging.info('Line:%d Best_BLEU:%f(%d)' % (index, best_bleu_score, best_score_index))
+
+      fw_all_ref.close()
+      fw_all_hyp.close()
+
+      bleu_score = execute_bleu_command(ALL_REF, ALL_HYP)
+      logging.info('Perfect Matches: %d/%d'%(perfect_matches, num_inputs))
+      return bleu_score, perfect_matches
 
 
 def setup_args():
