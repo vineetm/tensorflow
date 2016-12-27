@@ -1,5 +1,5 @@
 from collections import OrderedDict
-import codecs, re, commands
+import codecs, re, commands, os
 from itertools import permutations
 
 
@@ -25,6 +25,9 @@ DEV_OUTPUT = '%s.%s'%(DEV, OUTPUT_SUFFIX)
 ALL_REF = 'all_ref.txt'
 ALL_HYP = 'all_hyp.txt'
 
+REF = 'ref.txt'
+HYP = 'hyp.txt'
+
 CANDIDATES_SUFFIX = 'candidates.pkl'
 LM_SCORES_SUFFIX = 'lm.scores.pkl'
 FINAL_SCORES_SUFFIX = 'final.scores.pkl'
@@ -48,13 +51,20 @@ def execute_bleu_command(ref_file, hyp_file):
     return 0.0
 
 
-def get_bleu_score(reference, hypothesis):
-  with codecs.open('ref.txt', 'w', 'utf-8') as fw_ref:
-    fw_ref.write(reference.strip() + '\n')
+def get_bleu_score(reference, hypothesis, base_dir=None):
+    ref_file = REF
+    hyp_file = HYP
 
-  with codecs.open('hyp.txt', 'w', 'utf-8') as fw_hyp:
-    fw_hyp.write(hypothesis.strip() + '\n')
-  return execute_bleu_command('ref.txt', 'hyp.txt')
+    if base_dir is not None:
+        ref_file = os.path.join(base_dir, REF)
+        hyp_file = os.path.join(base_dir, HYP)
+
+    with codecs.open(ref_file, 'w', 'utf-8') as fw_ref:
+        fw_ref.write(reference.strip() + '\n')
+
+    with codecs.open(hyp_file, 'w', 'utf-8') as fw_hyp:
+        fw_hyp.write(hypothesis.strip() + '\n')
+    return execute_bleu_command(ref_file, hyp_file)
 
 
 def read_stopw(stopw_file):
