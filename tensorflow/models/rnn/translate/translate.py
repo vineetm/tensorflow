@@ -179,7 +179,7 @@ def train():
   print("Preparing WMT data in %s" % FLAGS.data_dir)
 
   en_train, fr_train, en_dev, fr_dev, _, _ = prepare_nsu_data(
-    FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size, tokenizer=space_tokenizer, normalize_digits=True)
+    FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size, tokenizer=space_tokenizer, normalize_digits=False)
 
   # # Device Placemement options
   # cf = tf.ConfigProto()
