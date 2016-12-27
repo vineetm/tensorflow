@@ -71,8 +71,8 @@ def read_stopw(stopw_file):
   stopw_set = set()
   with codecs.open(stopw_file, 'r', 'utf-8') as fr:
     for line in fr:
-      word = line.strip()
-      stopw_set.add(word)
+      words = line.strip().split()
+      stopw_set.add(words[0])
 
   stopw_set -= set(IGNORE_SW)
   return stopw_set
