@@ -195,7 +195,7 @@ def get_diff_unk_map(stopw, tokens, unk_map, symbol, numbers):
   return unk_map
 
 
-def get_diff_map(parts, stopw, numbers=True):
+def get_diff_map(parts, stopw, numbers=False):
   unk_map = OrderedDict()
   unk_symbols = ['Q1', 'A1', 'Q2']
 
