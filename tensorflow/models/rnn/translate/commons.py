@@ -12,7 +12,6 @@ IGNORE_SW = ['s', 't', 'd', 'm', 'o', 'y']
 SYMBOL_START = set(['Q', 'A', '_'])
 UNK_SET = set(['Q', 'A'])
 
-SET_ANAPHORA = set(['he', 'she', 'it', 'they', 'them', 'his', 'her'])
 STOPW_FILE = 'stopw.txt'
 DEV = 'data.dev'
 
