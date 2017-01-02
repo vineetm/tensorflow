@@ -12,6 +12,7 @@ IGNORE_SW = ['s', 't', 'd', 'm', 'o', 'y']
 SYMBOL_START = set(['Q', 'A', '_'])
 UNK_SET = set(['Q', 'A'])
 
+SET_ANAPHORA = set(['he', 'she', 'it', 'they', 'them', 'his', 'her'])
 STOPW_FILE = 'stopw.txt'
 DEV = 'data.dev'
 
@@ -284,6 +285,34 @@ def generate_new_candidates(input_line):
   for unk1 in set_unk_q1:
     for unk2 in candidate_unk_symbols:
       candidate = re.sub(unk1, unk2, q1)
+      new_candidates.add(candidate)
+  return new_candidates
+
+
+def get_anaphora(line):
+  anaphora = [token for token in line.split() if token in SET_ANAPHORA]
+  return set(anaphora)
+
+
+def generate_q2_anaphora_candidates(input_line):
+  new_candidates = set()
+  parts = input_line.split('EOS')
+  q2 = parts[2]
+
+  anaphora_q2 = get_anaphora(q2)
+  if len(anaphora_q2) == 0:
+      return []
+  elif len(anaphora_q2) > 1:
+      return []
+
+  unk_q1 = set(get_unk_symbols(parts[0]))
+  unk_a1 = set(get_unk_symbols(parts[1]))
+
+  candidate_unk_symbols = unk_a1 | unk_q1
+
+  for unk1 in anaphora_q2:
+    for unk2 in candidate_unk_symbols:
+      candidate = re.sub(unk1, unk2, q2)
       new_candidates.add(candidate)
   return new_candidates
 

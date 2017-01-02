@@ -6,7 +6,7 @@ from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids
 from commons import read_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
     get_rev_unk_map, fill_missing_symbols, generate_new_candidates, get_bleu_score, execute_bleu_command, \
-    get_unk_map, convert_phrase, STOPW_FILE
+    get_unk_map, convert_phrase, STOPW_FILE, generate_q2_anaphora_candidates
 from nltk.tokenize import word_tokenize as tokenizer
 from textblob.en.np_extractors import FastNPExtractor
 
@@ -233,12 +233,15 @@ class CandidateGenerator(object):
         return phrases
 
 
-    def transform_input(self, input_sentence):
+    def transform_input(self, input_sentence, compute_phrases=True):
         input_sentence = input_sentence.lower()
         parts = input_sentence.split(';')
         parts = [' '.join(tokenizer(part)) for part in parts]
-        phrases = self.get_phrases(parts)
-        replaced_parts = replace_phrases(parts, phrases)
+        if compute_phrases:
+            phrases = self.get_phrases(parts)
+            replaced_parts = replace_phrases(parts, phrases)
+        else:
+            replaced_parts = parts
         unk_map = get_diff_map(replaced_parts, self.stopw)
         input_sequence_orig = merge_parts(replaced_parts)
         input_sequence = replace_line(input_sequence_orig, unk_map)
@@ -247,10 +250,10 @@ class CandidateGenerator(object):
 
 
     def get_seq2seq_candidates(self, input_sentence, orig_unk_map=None, k=100, generate_codes=True,
-                               missing=False, use_q1=True, work_buffer=5):
+                               missing=False, use_q1=True, work_buffer=5, compute_phrases=True, use_q2=True):
 
         if generate_codes:
-            rev_unk_map, unk_map, input_seq_orig, input_seq = self.transform_input(input_sentence)
+            rev_unk_map, unk_map, input_seq_orig, input_seq = self.transform_input(input_sentence, compute_phrases)
             logging.info('UNK_Map: %s Reverse UNK_Map: %s'% (str(unk_map), str(rev_unk_map)))
             logging.info('Input_Seq_Orig: %s'%input_seq_orig)
             logging.info('Input_Seq: %s' %input_seq)
@@ -267,11 +270,16 @@ class CandidateGenerator(object):
         scores = scores[:k]
         if use_q1:
             new_candidates = generate_new_candidates(input_seq)
-            logging.debug('New Q1 Candidates: %d'%len(new_candidates))
+            logging.info('New Q1 Candidates: %d'%len(new_candidates))
             if len(scores) == 0 and len(new_candidates) == 0:
                 return [], []
 
             scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_candidates])
+
+        if use_q2:
+            new_q2_candidates = generate_q2_anaphora_candidates(input_seq)
+            logging.info('New Q2 Candidates: %d' % len(new_q2_candidates))
+            scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_q2_candidates])
 
         logging.info('Num candidates: %d'%len(scores))
         scores = sorted(scores, key=lambda t:t[0], reverse=True)
