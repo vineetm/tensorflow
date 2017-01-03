@@ -488,7 +488,7 @@ class CandidateGenerator(object):
             logging.debug('I_UNK: %s' % nsu_result.input_seq_unk.strip())
             logging.debug(' ')
 
-            logging.debug('G    : %s' % nsu_result.gold_line)
+            logging.debug('G    : %s' % orig_gold_lines[index].strip())
             logging.debug('G_UNK: %s' % gold_lines[index].strip())
             logging.debug(' ')
             for score_index, score in enumerate(final_scores):
