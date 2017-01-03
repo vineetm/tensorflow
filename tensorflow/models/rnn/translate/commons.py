@@ -315,6 +315,10 @@ def generate_q2_anaphora_candidates(input_line):
   for unk1 in anaphora_q2:
     for unk2 in candidate_unk_symbols:
       candidate = re.sub(unk1, unk2, q2)
+      candidate_tokens = candidate.split()
+
+      if candidate_tokens[0] == 'and':
+          candidate = ' '.join(candidate_tokens[1:])
       new_candidates.add(candidate)
   return new_candidates
 
