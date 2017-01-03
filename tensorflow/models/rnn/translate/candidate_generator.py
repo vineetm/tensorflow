@@ -4,15 +4,17 @@ import cPickle as pkl
 import numpy as np
 from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids
-from commons import read_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
-    get_rev_unk_map, fill_missing_symbols, generate_new_candidates, get_bleu_score, execute_bleu_command, \
-    get_unk_map, convert_phrase, STOPW_FILE, generate_q2_anaphora_candidates
+
 from nltk.tokenize import word_tokenize as tokenizer
 from textblob.en.np_extractors import FastNPExtractor
 
+from commons import read_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
+    get_rev_unk_map, generate_missing_symbol_candidates, generate_new_q1_candidates, get_bleu_score, \
+    execute_bleu_command, get_unk_map, convert_phrase,  generate_q2_anaphora_candidates
+
 #Constants
 from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV_OUTPUT, ORIG_PREFIX, \
-    ALL_HYP, ALL_REF, CANDIDATES_SUFFIX
+    ALL_HYP, ALL_REF, CANDIDATES_SUFFIX, STOPW_FILE, RESULTS_SUFFIX, NOT_SET, SCORES_SUFFIX
 
 
 logging = tf.logging
@@ -26,6 +28,39 @@ class PendingWork:
 
     def __str__(self):
         return 'Str=%s(%f)'%(self.prefix, self.prob)
+
+
+class Score(object):
+    def __init__(self, candidate, candidate_unk):
+        self.candidate = candidate
+        self.candidate_unk = candidate_unk
+        self.seq2seq_score = NOT_SET
+        self.bleu_score = NOT_SET
+
+    def set_seq2seq_score(self, prob):
+        self.seq2seq_score = prob
+
+    def set_bleu_score(self, gold_line):
+        self.bleu_score = get_bleu_score(gold_line, convert_phrase(self.candidate))
+
+    def __str__(self):
+        return 'C    : %s\nC_UNK: %s\nS:%f B:%f'%(self.candidate,
+                                                 self.candidate_unk, self.seq2seq_score, self.bleu_score)
+
+class NSUResult(object):
+    def __init__(self, training_scores,
+                 q1_scores, q2_scores, missing_scores):
+        self.training_scores = training_scores
+        self.q1_scores = q1_scores
+        self.q2_scores = q2_scores
+        self.missing_scores = missing_scores
+
+    def set_input(self, input_seq, input_seq_unk, unk_map, rev_unk_map, gold_line):
+        self.input_seq = input_seq
+        self.input_seq_unk = input_seq_unk
+        self.unk_map = unk_map
+        self.rev_unk_map = rev_unk_map
+        self.gold_line = gold_line
 
 
 class CandidateGenerator(object):
@@ -195,7 +230,10 @@ class CandidateGenerator(object):
         return prefix
 
 
-    def compute_scores(self, input_line, work_buffer):
+    '''
+    Select a subset of training candidates
+    '''
+    def select_training_candidates(self, input_line, work_buffer):
         final_scores = []
         num_comparisons = 0
 
@@ -214,11 +252,11 @@ class CandidateGenerator(object):
 
             for prefix in prefixes:
                 if prefix not in work.tree[SUBTREE]:
-                    final_scores.append((self.compute_prob(input_line, prefix), prefix))
+                    final_scores.append(prefix)
                 else:
                     pending_work.append(PendingWork(self.compute_prob(input_line, prefix), work.tree[SUBTREE][prefix], prefix))
-
             pending_work = self.prune_work(pending_work, work_buffer)
+
             if len(pending_work) == 0:
                 return final_scores, num_comparisons
 
@@ -248,54 +286,94 @@ class CandidateGenerator(object):
         rev_unk_map = get_rev_unk_map(unk_map)
         return rev_unk_map, unk_map, input_sequence_orig, input_sequence
 
+    def fill_scores(self, candidates, rev_unk_map, input_seq):
+        filled_candidates = []
+        for candidate in candidates:
+            filled_candidate = Score(candidate_unk=candidate, candidate=replace_line(candidate, rev_unk_map))
+            filled_candidate.set_seq2seq_score(self.compute_prob(input_seq, candidate))
 
-    def get_seq2seq_candidates(self, input_sentence, orig_unk_map=None, k=100, generate_codes=True,
-                               missing=False, use_q1=True, work_buffer=5, compute_phrases=True, use_q2=True):
+            filled_candidates.append(filled_candidate)
+        return filled_candidates
 
-        if generate_codes:
-            rev_unk_map, unk_map, input_seq_orig, input_seq = self.transform_input(input_sentence, compute_phrases)
-            logging.info('UNK_Map: %s Reverse UNK_Map: %s'% (str(unk_map), str(rev_unk_map)))
-            logging.info('Input_Seq_Orig: %s'%input_seq_orig)
-            logging.info('Input_Seq: %s' %input_seq)
-        else:
-            rev_unk_map = orig_unk_map
-            input_seq = input_sentence
 
-        logging.info('Input Seq len: %d'%len(input_seq))
-        scores, num_comparisons = self.compute_scores(input_seq, work_buffer)
+    '''
+    Return Candidates for an input sentence in decreasing order of seq2seq scores
+    input_sentence: Conversation (Q1, A1, Q2)
+    orig_unk_map: UNK symbol map
+    generate_codes: If symbols need to be assigned to tokens in input_sentence
+    work_buffer: Work buffer to select inputs from training data
+    compute_phrases: If input needs to be converted to phrases
+    missing: Replace missing symbols with symbols in UNK Map
+    '''
+    def get_seq2seq_candidates(self, input_seq, rev_unk_map, work_buffer=5, missing=False):
+
+        new_missing_scores = None
+        #Get Scores for all candidates generated from training data
+        training_candidates, num_comparisons = self.select_training_candidates(input_seq, work_buffer)
+        training_scores = self.fill_scores(training_candidates, rev_unk_map, input_seq)
+        logging.info('Num Train Candidates: %d Comparisons:%d'%(len(training_scores), num_comparisons))
+
         if missing:
-            scores = fill_missing_symbols(scores, rev_unk_map)
+            new_missing_candidates = generate_missing_symbol_candidates(training_candidates, rev_unk_map)
+            new_missing_scores = self.fill_scores(new_missing_candidates, rev_unk_map, input_seq)
+            logging.info('New Missing Candidates: %d'%len(new_missing_candidates))
 
-        logging.info('Num Scores: %d'%len(scores))
-        scores = scores[:k]
+        new_q1_candidates = generate_new_q1_candidates(input_seq)
+        new_q1_scores = self.fill_scores(new_q1_candidates, rev_unk_map, input_seq)
+        logging.info('New Q1 Candidates: %d'%len(new_q1_candidates))
+
+        new_q2_candidates = generate_q2_anaphora_candidates(input_seq)
+        new_q2_scores = self.fill_scores(new_q2_candidates, rev_unk_map, input_seq)
+        logging.info('New Q2 Candidates: %d' % len(new_q2_candidates))
+
+        nsu_result = NSUResult(training_scores, new_q1_scores, new_q2_scores, new_missing_scores)
+        return nsu_result
+
+
+    def add_candidate_scores(self, scores, current_set):
+        new_scores = []
+        for score in scores:
+            if score.candidate_unk in current_set:
+                continue
+            new_scores.append(score)
+            current_set.add(score.candidate_unk)
+        return current_set, new_scores
+
+
+    def merge_and_sort_scores(self, nsu_result, missing=False, use_q1=True, use_q2=True):
+        final_scores = nsu_result.training_scores
+        final_candidates_set = set()
+
+        if missing and nsu_result.missing_scores is not None:
+            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.missing_scores, final_candidates_set)
+            final_scores.extend(new_scores)
         if use_q1:
-            new_candidates = generate_new_candidates(input_seq)
-            logging.info('New Q1 Candidates: %d'%len(new_candidates))
-            if len(scores) == 0 and len(new_candidates) == 0:
-                return [], []
-
-            scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_candidates])
-
+            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.q1_scores,
+                                                                         final_candidates_set)
+            final_scores.extend(new_scores)
         if use_q2:
-            new_q2_candidates = generate_q2_anaphora_candidates(input_seq)
-            logging.info('New Q2 Candidates: %d' % len(new_q2_candidates))
-            scores.extend([(self.compute_prob(input_seq, new_candidate), new_candidate) for new_candidate in new_q2_candidates])
+            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.q2_scores,
+                                                                         final_candidates_set)
+            final_scores.extend(new_scores)
 
-        logging.info('Num candidates: %d'%len(scores))
-        scores = sorted(scores, key=lambda t:t[0], reverse=True)
-        if rev_unk_map is not None:
-            replaced_scores = [(score[0], replace_line(score[1], rev_unk_map)) for score in scores]
+        final_scores = sorted(final_scores, key=lambda x: x.seq2seq_score, reverse=True)
+        logging.info('# Merged scores: %d'%len(final_scores))
+        return final_scores
 
-        if orig_unk_map is None:
-            return replaced_scores
-        else:
-            return replaced_scores, scores
+    def get_raw_seq2seq_candidates(self, input_sentence, compute_phrases=True, missing=True, use_q1=True, use_q2=True):
+        rev_unk_map, unk_map, input_seq_orig, input_seq = self.transform_input(input_sentence, compute_phrases)
+        logging.info('UNK_Map: %s Reverse UNK_Map: %s' % (str(unk_map), str(rev_unk_map)))
+        logging.info('Input_Seq_Orig: %s' % input_seq_orig)
+        logging.info('Input_Seq(%d): %s' % (len(input_seq), input_seq))
 
+        nsu_result = self.get_seq2seq_candidates(input_seq, rev_unk_map, missing)
+        nsu_result.set_input(input_seq=input_seq_orig, input_seq_unk=input_seq, unk_map=unk_map, rev_unk_map=rev_unk_map)
+        results_file = '%s.%s'%('temp', RESULTS_SUFFIX)
+        pkl.dump(nsu_result, open(results_file, 'w'))
 
-    def get_vanila_candidates(self, input_sentence, work_buffer=5, k=100):
-        scores, num_comparisons = self.compute_scores(input_sentence, work_buffer)
-        scores = sorted(scores, key=lambda t: t[0], reverse=True)[:k]
-        return scores
+        final_scores = self.merge_and_sort_scores(nsu_result, missing, use_q1, use_q2)
+        return final_scores
+
 
     def read_data(self, input_file, output_file, base_dir):
         if base_dir is None:
@@ -320,40 +398,33 @@ class CandidateGenerator(object):
         return orig_input_lines, input_lines, orig_gold_lines, gold_lines
 
 
-    def save_best_results(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None):
-        orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
-        num_inputs = len(input_lines)
-        if num_lines > 0:
-            num_inputs = num_lines
+    def get_max_bleu_score(self, final_scores):
+        max_bleu = NOT_SET
+        max_bleu_index = NOT_SET
 
-        if base_dir is None:
-            base_dir = self.data_path
+        for index, score in enumerate(final_scores):
+            if score.bleu_score > max_bleu:
+                max_bleu = score.bleu_score
+                max_bleu_index = index
 
-        results_file_path = os.path.join(base_dir, '%s.%s'%(output_file, CANDIDATES_SUFFIX))
-        results = []
-        logging.info('Num inputs: %d' % num_inputs)
-
-        for index in range(num_inputs):
-
-            unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
-            scores, unk_scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
-                                                             orig_unk_map=unk_map, k=k, generate_codes=False)
-
-            scores = [(score[0], convert_phrase(score[1])) for score in scores]
-            results.append(scores)
-
-            if index %10== 0:
-                logging.info('Processed %d inputs'%index)
-
-        pkl.dump(results, open(results_file_path, 'w'))
+        return max_bleu, max_bleu_index
 
 
-    def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None, use_q1=True):
+    def add_all_bleu_scores(self, final_scores, gold_line):
+        for index, score in enumerate(final_scores):
+            score.set_bleu_score(gold_line)
+
+
+    def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None,
+                     use_q1=True, use_q2=True, missing=False, save_results=True):
         orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
 
         num_inputs = len(input_lines)
         if num_lines > 0:
             num_inputs = num_lines
+
+        candidates_file = '%s.%s' % (self.model_path, CANDIDATES_SUFFIX)
+        scores_file = '%s.%d.%s' % (self.model_path, k, SCORES_SUFFIX)
 
         logging.info('Num inputs: %d'%num_inputs)
 
@@ -364,61 +435,82 @@ class CandidateGenerator(object):
         fw_all_ref = codecs.open(all_ref_file, 'w', 'utf-8')
 
         perfect_matches = 0
+
+        saved_scores = []
+        if save_results:
+            saved_candidates = []
+        else:
+            if os.path.exists(candidates_file):
+                saved_candidates = pkl.load(open(candidates_file))
+            else:
+                logging.warning('Candidates file missing:%s'%candidates_file)
+                saved_candidates = []
+                save_results = True
+
         for index in range(num_inputs):
             gold_line = convert_phrase(orig_gold_lines[index].strip())
 
             unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
-            scores, unk_scores = self.get_seq2seq_candidates(input_sentence=input_lines[index],
-                                                             orig_unk_map=unk_map, k=k, generate_codes=False, use_q1=use_q1)
+            rev_unk_map = get_rev_unk_map(unk_map)
 
-            if len(scores) == 0:
-                logging.info('No candidates, Skip: %d'%index)
-                continue
+            if save_results:
+                nsu_result = self.get_seq2seq_candidates(input_seq=input_lines[index], rev_unk_map=unk_map, missing=missing)
+            else:
+                nsu_result = saved_candidates[index]
+                logging.info('Loaded Saved results Tr:%d Q1:%d Q2:%d'%(len(nsu_result.training_scores),
+                                                                       len(nsu_result.q1_scores),
+                                                                       len(nsu_result.q2_scores)))
 
-            bleu_scores = [get_bleu_score(gold_line, convert_phrase(score[1]), self.model_path) for score in scores]
+            nsu_result.set_input(input_seq=orig_input_lines[index], input_seq_unk=input_lines[index], unk_map=unk_map,
+                                 rev_unk_map=rev_unk_map, gold_line=gold_line)
 
-            best_score_index = np.argmax(bleu_scores)
-            best_bleu_score = bleu_scores[best_score_index]
-            hyp_line = convert_phrase(scores[best_score_index][1].strip())
+            if save_results:
+                saved_candidates.append(nsu_result)
+
+            final_scores = self.merge_and_sort_scores(nsu_result, missing, use_q1, use_q2)
+            self.add_all_bleu_scores(final_scores, gold_line)
+
+            saved_scores.append(final_scores)
+
+            best_bleu_score, best_bleu_index = self.get_max_bleu_score(final_scores)
+
+            if best_bleu_index >= k:
+                logging.warning('Line:%d Best:%d BLEU:%f'%(index, best_bleu_index, best_bleu_score))
+                final_scores = final_scores[:k]
+                best_bleu_score, best_bleu_index = self.get_max_bleu_score(final_scores)
 
             if best_bleu_score == 100.0:
                 perfect_matches += 1
 
-
             fw_all_ref.write(gold_line + '\n')
-            fw_all_hyp.write(hyp_line + '\n')
+            fw_all_hyp.write(convert_phrase(final_scores[best_bleu_index].candidate) + '\n')
 
-            if self.debug:
-                logging.debug('Input: %s'%orig_input_lines[index].strip())
-                logging.debug('Input_UNK: %s' % input_lines[index].strip())
-                logging.debug('')
-                logging.debug('Gold: %s'%orig_gold_lines[index].strip())
-                logging.debug('Gold_UNK: %s' % gold_lines[index].strip())
-                logging.debug('')
-                logging.debug('UNK_Map: %s'%str(unk_map))
-
-                for score_index in range(len(scores)):
-                    logging.debug('C: %s B:%f Seq:%f'%(scores[score_index][1], bleu_scores[score_index], scores[score_index][0]))
-                    logging.debug('C_UNK: %s' %unk_scores[score_index][1])
-                    logging.debug('')
-
-            logging.info('Line:%d Best_BLEU:%f(%d)' % (index, best_bleu_score, best_score_index))
+            logging.info('Line:%d Best_BLEU:%f(%d)' % (index, best_bleu_score, best_bleu_index))
 
         fw_all_ref.close()
         fw_all_hyp.close()
 
         bleu_score = execute_bleu_command(all_ref_file, all_hyp_file)
         logging.info('Perfect Matches: %d/%d'%(perfect_matches, num_inputs))
+
+        if save_results:
+            pkl.dump(saved_candidates, open(candidates_file, 'w'))
+        pkl.dump(saved_scores, open(scores_file, 'w'))
+
+
         return bleu_score, perfect_matches
 
 
 def setup_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('model_dir', help='Trained Model Directory')
-    parser.add_argument('-k', default=100, type=int, help='# of candidates')
-    parser.add_argument('-l', default=-1, type=int, help='# of candidates')
+    parser.add_argument('-l', default=-1, type=int, help='# of lines to consider')
+    parser.add_argument('-k', default=100, type=int, help='# of Training candidates')
+    parser.add_argument('-no_q1', dest='use_q1', default=True, action='store_false')
+    parser.add_argument('-no_q2', dest='use_q2', default=True, action='store_false')
+    parser.add_argument('-missing',dest='missing', default=False, action='store_true')
     parser.add_argument('-debug', dest='debug', default=False, action='store_true')
-    parser.add_argument('-no_q1', dest='no_q1', default=False, action='store_true')
+    parser.add_argument('-save_results', dest='save_results', default=False, action='store_true')
     args = parser.parse_args()
     return args
 
@@ -426,6 +518,8 @@ if __name__ == '__main__':
     args = setup_args()
     tm = CandidateGenerator(args.model_dir, debug=args.debug)
     logging.info(args)
-    #tm.save_best_results()
-    bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k, use_q1 = not args.no_q1)
+
+    bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k,
+                                            use_q1=args.use_q1, use_q2=args.use_q2, missing=args.missing, save_results=args.save_results)
+
     logging.info('BLEU: %f Perfect Matches: %d'%(bleu, perfect_matches))

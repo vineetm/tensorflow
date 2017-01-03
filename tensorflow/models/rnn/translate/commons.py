@@ -3,6 +3,8 @@ import codecs, re, commands, os
 from itertools import permutations
 
 
+NOT_SET = -99.0
+
 LEAVES='_LEAVES_'
 SUBTREE='_SUBTREE_'
 CONFIG_FILE = 'config.ckpt'
@@ -30,8 +32,9 @@ REF = 'ref.txt'
 HYP = 'hyp.txt'
 
 CANDIDATES_SUFFIX = 'candidates.pkl'
-LM_SCORES_SUFFIX = 'lm.scores.pkl'
-FINAL_SCORES_SUFFIX = 'final.scores.pkl'
+SCORES_SUFFIX = 'scores.pkl'
+
+RESULTS_SUFFIX = 'results.pkl'
 
 LM_VOCAB_FILE = 'vocab.pkl'
 
@@ -242,35 +245,35 @@ def get_unresolved_symbols_and_indexes(tokens, available_symbols):
     unresolved_symbols.append(token)
   return indexes, unresolved_symbols, used_symbols
 
+'''
+Replace missing symbols with unused symbols
+'''
+def generate_missing_symbol_candidates(orig_candidates, unk_map):
+    available_symbols = set(unk_map.keys())
+    new_candidates = set()
 
-def fill_missing_symbols(orig_candidates, unk_map):
-  unchanged = 0
-  skipped = 0
-  available_symbols = set(unk_map.keys())
-  unk_candidates = []
-  for orig_candidate in orig_candidates:
-    prob, candidate = orig_candidate
-    tokens = candidate.split()
-    unresolved_symbols_indexes, unresolved_symbols, used_symbols = get_unresolved_symbols_and_indexes(tokens, available_symbols)
-    unused_symbols = available_symbols - used_symbols
-    if len(unresolved_symbols) >= 1:
-      if len(unresolved_symbols) > len(unused_symbols):
-        skipped += 1
-        continue
-      replacement_candidates = generate_replacements(tokens, unresolved_symbols_indexes, list(unused_symbols))
-      unk_candidates.extend([(prob, replacement_candidate) for replacement_candidate in replacement_candidates])
-    else:
-      unchanged += 1
+    for orig_candidate in orig_candidates:
+        tokens = orig_candidate.split()
+        unresolved_symbols_indexes, unresolved_symbols, used_symbols = get_unresolved_symbols_and_indexes(tokens, available_symbols)
+        unused_symbols = available_symbols - used_symbols
 
-    unk_candidates.append((prob, candidate))
-  return unk_candidates
+        if len(unresolved_symbols) >= 1:
+            if len(unresolved_symbols) > len(unused_symbols):
+                continue
+            replacement_candidates = generate_replacements(tokens, unresolved_symbols_indexes, list(unused_symbols))
+            for candidate in replacement_candidates:
+                new_candidates.add(candidate)
+
+    return new_candidates
 
 def get_unk_symbols(part):
   unk_symbols = [token for token in part.split() if token[0] in UNK_SET]
   return unk_symbols
 
-
-def generate_new_candidates(input_line):
+'''
+Generate candidates by replacing available symbols(from A1 and Q2) in Q1
+'''
+def generate_new_q1_candidates(input_line):
   new_candidates = set()
   parts = input_line.split('EOS')
   q1 = parts[0]
@@ -279,7 +282,6 @@ def generate_new_candidates(input_line):
 
   unk_a1 = set(get_unk_symbols(parts[1])) - set_unk_q1
   unk_q2 = set(get_unk_symbols(parts[2])) - set_unk_q1
-
   candidate_unk_symbols = unk_a1 | unk_q2
 
   for unk1 in set_unk_q1:
