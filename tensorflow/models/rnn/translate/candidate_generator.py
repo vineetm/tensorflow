@@ -14,7 +14,7 @@ from commons import read_stopw, replace_line, replace_phrases, get_diff_map, mer
 
 #Constants
 from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV_OUTPUT, ORIG_PREFIX, \
-    ALL_HYP, ALL_REF, CANDIDATES_SUFFIX, STOPW_FILE, RESULTS_SUFFIX, NOT_SET, SCORES_SUFFIX
+    ALL_HYP, ALL_REF, CANDIDATES_SUFFIX, STOPW_FILE, RESULTS_SUFFIX, NOT_SET, SCORES_SUFFIX, UNK_SET
 
 
 logging = tf.logging
@@ -49,11 +49,12 @@ class Score(object):
 
 class NSUResult(object):
     def __init__(self, training_scores,
-                 q1_scores, q2_scores, missing_scores):
+                 q1_scores, q2_scores, missing_scores, kw_scores):
         self.training_scores = training_scores
         self.q1_scores = q1_scores
         self.q2_scores = q2_scores
         self.missing_scores = missing_scores
+        self.kw_scores = kw_scores
 
     def set_input(self, input_seq, input_seq_unk, unk_map, rev_unk_map, gold_line):
         self.input_seq = input_seq
@@ -121,6 +122,8 @@ class CandidateGenerator(object):
         logging.info('Stopw: %d' % len(self.stopw))
         #Read Candidates and build a prefix tree
         self.build_prefix_tree()
+        self.build_keyword_hashmap()
+
         logging.info('Prefix Tree Leaves:%d' % len(self.prefix_tree[LEAVES]))
 
     def get_node(self):
@@ -159,6 +162,27 @@ class CandidateGenerator(object):
 
         self.prefix_tree = root
         self.prune_tree(self.prefix_tree)
+
+
+    def build_keyword_hashmap(self):
+        symbols = [token for token in self.en_vocab if token[0] in UNK_SET]
+        self.keywords_map = {}
+
+        for index, candidate in enumerate(self.candidates):
+            candidate_tokens = candidate.split()
+            key1 = candidate_tokens[0]
+            candidate_symbols = set([token for token in candidate_tokens if token[0] in UNK_SET])
+
+            for key2 in candidate_symbols:
+                key = '%s %s'%(key1, key2)
+
+                if key not in self.keywords_map:
+                    self.keywords_map[key] = set()
+
+                self.keywords_map[key].add(index)
+
+        for key in self.keywords_map:
+            logging.info('Key: %s #Candidates: %d'%(key, len(self.keywords_map[key])))
 
 
     def read_raw_candidates(self):
@@ -296,6 +320,10 @@ class CandidateGenerator(object):
         return filled_candidates
 
 
+    def generate_kw_candidates(self, input_seq):
+        return []
+
+
     '''
     Return Candidates for an input sentence in decreasing order of seq2seq scores
     input_sentence: Conversation (Q1, A1, Q2)
@@ -305,9 +333,11 @@ class CandidateGenerator(object):
     compute_phrases: If input needs to be converted to phrases
     missing: Replace missing symbols with symbols in UNK Map
     '''
-    def get_seq2seq_candidates(self, input_seq, rev_unk_map, work_buffer=5, missing=False):
+    def get_seq2seq_candidates(self, input_seq, rev_unk_map, work_buffer=5, missing=False, kw_candidates=False):
 
         new_missing_scores = None
+        kw_scores = None
+
         #Get Scores for all candidates generated from training data
         training_candidates, num_comparisons = self.select_training_candidates(input_seq, work_buffer)
         training_scores = self.fill_scores(training_candidates, rev_unk_map, input_seq)
@@ -318,6 +348,11 @@ class CandidateGenerator(object):
             new_missing_scores = self.fill_scores(new_missing_candidates, rev_unk_map, input_seq)
             logging.info('New Missing Candidates: %d'%len(new_missing_candidates))
 
+        if kw_candidates:
+            new_candidates = self.generate_kw_candidates(input_seq)
+            kw_scores = self.fill_scores(new_candidates, rev_unk_map, input_seq)
+            logging.info('New KW Candidates: %d'%len(kw_scores))
+
         new_q1_candidates = generate_new_q1_candidates(input_seq)
         new_q1_scores = self.fill_scores(new_q1_candidates, rev_unk_map, input_seq)
         logging.info('New Q1 Candidates: %d'%len(new_q1_candidates))
@@ -326,7 +361,7 @@ class CandidateGenerator(object):
         new_q2_scores = self.fill_scores(new_q2_candidates, rev_unk_map, input_seq)
         logging.info('New Q2 Candidates: %d' % len(new_q2_candidates))
 
-        nsu_result = NSUResult(training_scores, new_q1_scores, new_q2_scores, new_missing_scores)
+        nsu_result = NSUResult(training_scores, new_q1_scores, new_q2_scores, new_missing_scores, kw_scores)
         return nsu_result
 
 
@@ -340,7 +375,7 @@ class CandidateGenerator(object):
         return current_set, new_scores
 
 
-    def merge_and_sort_scores(self, nsu_result, missing=False, use_q1=True, use_q2=True):
+    def merge_and_sort_scores(self, nsu_result, missing=False, use_q1=True, use_q2=True, kw_candidates=False):
         final_scores = nsu_result.training_scores
         final_candidates_set = set()
 
@@ -353,6 +388,11 @@ class CandidateGenerator(object):
             final_scores.extend(new_scores)
         if use_q2:
             final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.q2_scores,
+                                                                         final_candidates_set)
+            final_scores.extend(new_scores)
+
+        if kw_candidates:
+            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.kw_scores,
                                                                          final_candidates_set)
             final_scores.extend(new_scores)
 
@@ -416,7 +456,7 @@ class CandidateGenerator(object):
 
 
     def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT,
-                     use_q1=True, use_q2=True, missing=False):
+                     use_q1=True, use_q2=True, missing=False, kw_candidates=False):
         orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file)
 
         num_inputs = len(input_lines)
@@ -452,7 +492,8 @@ class CandidateGenerator(object):
             rev_unk_map = get_rev_unk_map(unk_map)
 
             if save_results:
-                nsu_result = self.get_seq2seq_candidates(input_seq=input_lines[index], rev_unk_map=unk_map, missing=missing)
+                nsu_result = self.get_seq2seq_candidates(input_seq=input_lines[index], rev_unk_map=unk_map,
+                                                         missing=missing, kw_candidates=kw_candidates)
             else:
                 nsu_result = saved_candidates[index]
                 logging.info('Loaded Saved results Tr:%d Q1:%d Q2:%d'%(len(nsu_result.training_scores),
@@ -519,6 +560,7 @@ def setup_args():
     parser.add_argument('-no_q2', dest='use_q2', default=True, action='store_false')
     parser.add_argument('-missing',dest='missing', default=False, action='store_true')
     parser.add_argument('-debug', dest='debug', default=False, action='store_true')
+    parser.add_argument('-kw_candidates', dest='kw_candidates', default=False, action='store_true')
     args = parser.parse_args()
     return args
 
@@ -528,6 +570,6 @@ if __name__ == '__main__':
     logging.info(args)
 
     bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k,
-                                            use_q1=args.use_q1, use_q2=args.use_q2, missing=args.missing)
+                                            use_q1=args.use_q1, use_q2=args.use_q2, missing=args.missing, kw_candidates=args.kw_candidates)
 
     logging.info('BLEU: %f Perfect Matches: %d'%(bleu, perfect_matches))
