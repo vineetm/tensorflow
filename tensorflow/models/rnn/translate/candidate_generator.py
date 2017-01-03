@@ -32,8 +32,8 @@ class PendingWork:
 
 class Score(object):
     def __init__(self, candidate, candidate_unk):
-        self.candidate = candidate
-        self.candidate_unk = candidate_unk
+        self.candidate = candidate.strip()
+        self.candidate_unk = candidate_unk.strip()
         self.seq2seq_score = NOT_SET
         self.bleu_score = NOT_SET
 
@@ -60,7 +60,7 @@ class NSUResult(object):
         self.input_seq_unk = input_seq_unk
         self.unk_map = unk_map
         self.rev_unk_map = rev_unk_map
-        self.gold_line = gold_line
+        self.gold_line = gold_line.strip()
 
 
 class CandidateGenerator(object):
@@ -375,7 +375,7 @@ class CandidateGenerator(object):
         return final_scores
 
 
-    def read_data(self, input_file, output_file, base_dir):
+    def read_data(self, input_file, output_file, base_dir=None):
         if base_dir is None:
             base_dir = self.data_path
 
@@ -415,9 +415,9 @@ class CandidateGenerator(object):
             score.set_bleu_score(gold_line)
 
 
-    def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT, base_dir=None,
-                     use_q1=True, use_q2=True, missing=False, save_results=True):
-        orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file, base_dir)
+    def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT,
+                     use_q1=True, use_q2=True, missing=False):
+        orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file)
 
         num_inputs = len(input_lines)
         if num_lines > 0:
@@ -437,15 +437,13 @@ class CandidateGenerator(object):
         perfect_matches = 0
 
         saved_scores = []
-        if save_results:
-            saved_candidates = []
+        save_results = False
+        if os.path.exists(candidates_file):
+            saved_candidates = pkl.load(open(candidates_file))
         else:
-            if os.path.exists(candidates_file):
-                saved_candidates = pkl.load(open(candidates_file))
-            else:
-                logging.warning('Candidates file missing:%s'%candidates_file)
-                saved_candidates = []
-                save_results = True
+            logging.warning('Candidates file missing:%s'%candidates_file)
+            saved_candidates = []
+            save_results = True
 
         for index in range(num_inputs):
             gold_line = convert_phrase(orig_gold_lines[index].strip())
@@ -471,7 +469,6 @@ class CandidateGenerator(object):
             self.add_all_bleu_scores(final_scores, gold_line)
 
             saved_scores.append(final_scores)
-
             best_bleu_score, best_bleu_index = self.get_max_bleu_score(final_scores)
 
             if best_bleu_index >= k:
@@ -486,6 +483,18 @@ class CandidateGenerator(object):
             fw_all_hyp.write(convert_phrase(final_scores[best_bleu_index].candidate) + '\n')
 
             logging.info('Line:%d Best_BLEU:%f(%d)' % (index, best_bleu_score, best_bleu_index))
+
+            logging.debug('I    : %s' % nsu_result.input_seq.strip())
+            logging.debug('I_UNK: %s' % nsu_result.input_seq_unk.strip())
+            logging.debug(' ')
+
+            logging.debug('G    : %s' % nsu_result.gold_line)
+            logging.debug('G_UNK: %s' % gold_lines[index].strip())
+            logging.debug(' ')
+            for score_index, score in enumerate(final_scores):
+                logging.debug('C    :%d B:%2.2f S:%.3f %s'%(score_index, score.bleu_score, score.seq2seq_score, score.candidate))
+                logging.debug('C_UNK:%d B:%2.2f S:%.3f %s'%(score_index, score.bleu_score, score.seq2seq_score, score.candidate_unk))
+                logging.debug('')
 
         fw_all_ref.close()
         fw_all_hyp.close()
@@ -510,7 +519,6 @@ def setup_args():
     parser.add_argument('-no_q2', dest='use_q2', default=True, action='store_false')
     parser.add_argument('-missing',dest='missing', default=False, action='store_true')
     parser.add_argument('-debug', dest='debug', default=False, action='store_true')
-    parser.add_argument('-save_results', dest='save_results', default=False, action='store_true')
     args = parser.parse_args()
     return args
 
@@ -520,6 +528,6 @@ if __name__ == '__main__':
     logging.info(args)
 
     bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k,
-                                            use_q1=args.use_q1, use_q2=args.use_q2, missing=args.missing, save_results=args.save_results)
+                                            use_q1=args.use_q1, use_q2=args.use_q2, missing=args.missing)
 
     logging.info('BLEU: %f Perfect Matches: %d'%(bleu, perfect_matches))
