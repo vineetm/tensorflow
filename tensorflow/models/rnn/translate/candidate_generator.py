@@ -321,7 +321,37 @@ class CandidateGenerator(object):
 
 
     def generate_kw_candidates(self, input_seq):
-        return []
+        parts = input_seq.split('EOS')
+        q1 = parts[0].split()
+        a1 = parts[1].split()
+        q2 = parts[2].split()
+
+        key1 = set()
+        key1.add(q1[0])
+
+        if q2[0] == 'and':
+            if len(q2) > 1:
+                key1.add(q2[1])
+        else:
+            key1.add(q2[0])
+
+        candidate_set = set()
+        key2 = set()
+        key2 |= set([token for token in a1[:1] if token[0] in UNK_SET])
+        key2 |= set([token for token in q2[:1] if token[0] in UNK_SET])
+
+        kw_candidates = []
+        for k1 in key1:
+            for k2 in key2:
+                key = '%s %s'%(k1, k2)
+
+            if key in self.keywords_map:
+                candidate_set |= self.keywords_map[key]
+
+        for candidate_index in candidate_set:
+            kw_candidates.append(self.candidates[candidate_index])
+
+        return kw_candidates
 
 
     '''
@@ -506,7 +536,7 @@ class CandidateGenerator(object):
             if save_results:
                 saved_candidates.append(nsu_result)
 
-            final_scores = self.merge_and_sort_scores(nsu_result, missing, use_q1, use_q2)
+            final_scores = self.merge_and_sort_scores(nsu_result, missing, use_q1, use_q2, kw_candidates)
             self.add_all_bleu_scores(final_scores, gold_line)
 
             saved_scores.append(final_scores)
