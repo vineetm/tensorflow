@@ -344,9 +344,8 @@ class CandidateGenerator(object):
         for k1 in key1:
             for k2 in key2:
                 key = '%s %s'%(k1, k2)
-
-            if key in self.keywords_map:
-                candidate_set |= self.keywords_map[key]
+                if key in self.keywords_map:
+                    candidate_set |= self.keywords_map[key]
 
         for candidate_index in candidate_set:
             kw_candidates.append(self.candidates[candidate_index])
