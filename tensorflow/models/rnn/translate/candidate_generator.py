@@ -61,7 +61,8 @@ class NSUResult(object):
         self.input_seq_unk = input_seq_unk
         self.unk_map = unk_map
         self.rev_unk_map = rev_unk_map
-        self.gold_line = gold_line.strip()
+        if gold_line is not None:
+            self.gold_line = gold_line.strip()
 
 
 class CandidateGenerator(object):
@@ -436,7 +437,7 @@ class CandidateGenerator(object):
         logging.info('Input_Seq(%d): %s' % (len(input_seq), input_seq))
 
         nsu_result = self.get_seq2seq_candidates(input_seq, rev_unk_map, missing)
-        nsu_result.set_input(input_seq=input_seq_orig, input_seq_unk=input_seq, unk_map=unk_map, rev_unk_map=rev_unk_map)
+        nsu_result.set_input(input_seq=input_seq_orig, input_seq_unk=input_seq, unk_map=unk_map, rev_unk_map=rev_unk_map, gold_line=None)
         results_file = '%s.%s'%('temp', RESULTS_SUFFIX)
         pkl.dump(nsu_result, open(results_file, 'w'))
 
