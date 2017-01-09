@@ -1,7 +1,9 @@
 from collections import OrderedDict
 import codecs, re, commands, os
 from itertools import permutations
+import tensorflow as tf
 
+logging = tf.logging
 
 NOT_SET = -99.0
 
@@ -338,3 +340,45 @@ def convert_phrase(line):
       final_tokens.append(token)
 
   return ' '.join(final_tokens)
+
+
+def add_candidate_scores(scores, current_set):
+    new_scores = []
+    for score in scores:
+        if score.candidate_unk in current_set:
+            continue
+        new_scores.append(score)
+        current_set.add(score.candidate_unk)
+    return current_set, new_scores
+
+
+def merge_and_sort_scores(nsu_result, missing=False, use_q1=True, use_q2=True, kw_candidates=False):
+    final_scores = nsu_result.training_scores
+    final_candidates_set = set()
+
+    if missing and nsu_result.missing_scores is not None:
+        final_candidates_set, new_scores = add_candidate_scores(nsu_result.missing_scores, final_candidates_set)
+        logging.info('Missing: %d'%len(new_scores))
+        final_scores.extend(new_scores)
+
+    if use_q1:
+        final_candidates_set, new_scores = add_candidate_scores(nsu_result.q1_scores,
+                                                                 final_candidates_set)
+        logging.info('Q1: %d' % len(new_scores))
+        final_scores.extend(new_scores)
+
+    if use_q2:
+        final_candidates_set, new_scores = add_candidate_scores(nsu_result.q2_scores,
+                                                                 final_candidates_set)
+        logging.info('Q2: %d' % len(new_scores))
+        final_scores.extend(new_scores)
+
+    if kw_candidates:
+        final_candidates_set, new_scores = add_candidate_scores(nsu_result.kw_scores,
+                                                                     final_candidates_set)
+        logging.info('KW: %d' % len(new_scores))
+        final_scores.extend(new_scores)
+
+    final_scores = sorted(final_scores, key=lambda x: x.seq2seq_score, reverse=True)
+    logging.info('Final: %d' % len(final_scores))
+    return final_scores

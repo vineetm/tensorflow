@@ -79,7 +79,7 @@ class LargeConfig(object):
   keep_prob = 0.35
   lr_decay = 1 / 1.15
   batch_size = 1
-  vocab_size = 30002
+  vocab_size = 10000
   max_len = 50
 
 class LanguageModel(object):
@@ -175,7 +175,7 @@ class LanguageModel(object):
     sentence = sentence.lower()
     tokens = tokenizer(sentence)
     token_ids = [self.word_to_id[token] if token in self.word_to_id
-                 else self.word_to_id['_UNK']
+                 else self.word_to_id['<unk>']
                  for token in tokens]
     token_ids.insert(0, self.word_to_id['<eos>'])
 

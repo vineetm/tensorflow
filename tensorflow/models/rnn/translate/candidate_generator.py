@@ -10,7 +10,7 @@ from textblob.en.np_extractors import FastNPExtractor
 
 from commons import read_stopw, replace_line, replace_phrases, get_diff_map, merge_parts, \
     get_rev_unk_map, generate_missing_symbol_candidates, generate_new_q1_candidates, get_bleu_score, \
-    execute_bleu_command, get_unk_map, convert_phrase,  generate_q2_anaphora_candidates
+    execute_bleu_command, get_unk_map, convert_phrase,  generate_q2_anaphora_candidates, merge_and_sort_scores
 
 #Constants
 from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV_OUTPUT, ORIG_PREFIX, \
@@ -395,40 +395,6 @@ class CandidateGenerator(object):
         return nsu_result
 
 
-    def add_candidate_scores(self, scores, current_set):
-        new_scores = []
-        for score in scores:
-            if score.candidate_unk in current_set:
-                continue
-            new_scores.append(score)
-            current_set.add(score.candidate_unk)
-        return current_set, new_scores
-
-
-    def merge_and_sort_scores(self, nsu_result, missing=False, use_q1=True, use_q2=True, kw_candidates=False):
-        final_scores = nsu_result.training_scores
-        final_candidates_set = set()
-
-        if missing and nsu_result.missing_scores is not None:
-            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.missing_scores, final_candidates_set)
-            final_scores.extend(new_scores)
-        if use_q1:
-            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.q1_scores,
-                                                                         final_candidates_set)
-            final_scores.extend(new_scores)
-        if use_q2:
-            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.q2_scores,
-                                                                         final_candidates_set)
-            final_scores.extend(new_scores)
-
-        if kw_candidates:
-            final_candidates_set, new_scores = self.add_candidate_scores(nsu_result.kw_scores,
-                                                                         final_candidates_set)
-            final_scores.extend(new_scores)
-
-        final_scores = sorted(final_scores, key=lambda x: x.seq2seq_score, reverse=True)
-        logging.info('# Merged scores: %d'%len(final_scores))
-        return final_scores
 
     def get_raw_seq2seq_candidates(self, input_sentence, compute_phrases=True, missing=True, use_q1=True, use_q2=True):
         rev_unk_map, unk_map, input_seq_orig, input_seq = self.transform_input(input_sentence, compute_phrases)
@@ -441,7 +407,7 @@ class CandidateGenerator(object):
         results_file = '%s.%s'%('temp', RESULTS_SUFFIX)
         pkl.dump(nsu_result, open(results_file, 'w'))
 
-        final_scores = self.merge_and_sort_scores(nsu_result, missing, use_q1, use_q2)
+        final_scores = merge_and_sort_scores(nsu_result, missing, use_q1, use_q2)
         return final_scores
 
 
