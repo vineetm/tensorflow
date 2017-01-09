@@ -3,6 +3,7 @@ import cPickle as pkl, codecs
 from candidate_generator import Score, NSUResult
 import tensorflow as tf, os
 from commons import merge_and_sort_scores, execute_bleu_command
+from commons import ALL_REF, ALL_HYP
 
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
@@ -43,6 +44,7 @@ class Rescorer(object):
     def __init__(self, seq2seq_dir, lm_data=DEFAULT_LM_DATA, lm_model=DEFAULT_LM_MODEL):
         self.lm = LanguageModel(lm_data, lm_model)
         self.seq2seq_results = pkl.load(open(os.path.join(seq2seq_dir, SEQ2SEQ_RESULTS)))
+        self.base_dir = seq2seq_dir
 
     def get_lm_scores(self, score_index):
         final_scores = []
@@ -107,10 +109,10 @@ def main():
     rescorer = Rescorer(args.model_dir)
 
     final_lm_scores = []
-
+    lm_scores_file = os.path.join(rescorer.base_dir, LM_SCORES)
 
     if os.path.exists(LM_SCORES):
-        final_lm_scores = pkl.load(open(LM_SCORES))
+        final_lm_scores = pkl.load(open(lm_scores_file))
         logging.info('Loaded %d LM_Scores from %s'%(len(final_lm_scores), LM_SCORES))
     else:
         if args.index == -1:
@@ -123,11 +125,14 @@ def main():
             lm_scores = rescorer.get_lm_scores(line_index)
             final_lm_scores.append(lm_scores)
             logging.info('Line: %d lm_score done'%line_index)
-        pkl.dump(final_lm_scores, open(LM_SCORES, 'w'))
+        pkl.dump(final_lm_scores, open(lm_scores_file, 'w'))
 
     reordered_lm_scores = rescorer.reorder_scores(final_lm_scores, weight=args.weight)
-    fw_all_hyp = codecs.open('hyp.txt', 'w', 'utf-8')
-    fw_all_ref = codecs.open('ref.txt', 'w', 'utf-8')
+    all_hyp_file = os.path.join(rescorer.base_dir, ALL_HYP)
+    all_ref_file = os.path.join(rescorer.base_dir, ALL_REF)
+
+    fw_all_hyp = codecs.open(all_hyp_file, 'w', 'utf-8')
+    fw_all_ref = codecs.open(all_ref_file, 'w', 'utf-8')
 
     for index, final_scores in enumerate(reordered_lm_scores):
         final_scores = final_scores[:args.k]
@@ -136,7 +141,7 @@ def main():
         fw_all_hyp.write(final_scores[best_bleu_index].score.candidate.strip() + '\n')
         fw_all_ref.write(rescorer.seq2seq_results[index].gold_line.strip() + '\n')
 
-    bleu_score = execute_bleu_command('ref.txt', 'hyp.txt')
+    bleu_score = execute_bleu_command(all_ref_file, all_hyp_file)
     logging.info('Final BLEU: %f'%bleu_score)
 
 if __name__ == '__main__':
