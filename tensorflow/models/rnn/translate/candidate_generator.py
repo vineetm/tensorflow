@@ -14,7 +14,8 @@ from commons import read_stopw, replace_line, replace_phrases, get_diff_map, mer
 
 #Constants
 from commons import CONFIG_FILE, SUBTREE, LEAVES, RAW_CANDIDATES, DEV_INPUT, DEV_OUTPUT, ORIG_PREFIX, \
-    ALL_HYP, ALL_REF, CANDIDATES_SUFFIX, STOPW_FILE, RESULTS_SUFFIX, NOT_SET, SCORES_SUFFIX, UNK_SET
+    ALL_HYP, ALL_REF, CANDIDATES_SUFFIX, STOPW_FILE, RESULTS_SUFFIX, NOT_SET, SCORES_SUFFIX, UNK_SET, \
+    TEST_INPUT, TEST_OUTPUT, TEST
 
 
 logging = tf.logging
@@ -66,7 +67,7 @@ class NSUResult(object):
 
 
 class CandidateGenerator(object):
-    def __init__(self, models_dir, debug=False):
+    def __init__(self, models_dir, debug=False, kw_candidates=False):
         config_file_path = os.path.join(models_dir, CONFIG_FILE)
         if debug:
             logging.set_verbosity(tf.logging.DEBUG)
@@ -85,6 +86,7 @@ class CandidateGenerator(object):
         self.target_vocab_size = config['target_vocab_size']
         self._buckets = config['_buckets']
         self.np_ex = FastNPExtractor()
+        self.kw_candidates = kw_candidates
         #self.stopw = get_stopw()
 
 
@@ -123,7 +125,9 @@ class CandidateGenerator(object):
         logging.info('Stopw: %d' % len(self.stopw))
         #Read Candidates and build a prefix tree
         self.build_prefix_tree()
-        self.build_keyword_hashmap()
+
+        if self.kw_candidates:
+            self.build_keyword_hashmap()
 
         logging.info('Prefix Tree Leaves:%d' % len(self.prefix_tree[LEAVES]))
 
@@ -451,37 +455,55 @@ class CandidateGenerator(object):
             score.set_bleu_score(gold_line)
 
 
-    def compute_bleu(self, k=100, num_lines=-1, input_file=DEV_INPUT, output_file=DEV_OUTPUT,
-                     use_q1=True, use_q2=True, missing=False, kw_candidates=False):
-        orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file)
+    def compute_bleu(self, k=100, num_lines=-1, test=False, use_q1=True, use_q2=True,
+                     missing=False, kw_candidates=False):
+        input_file = DEV_INPUT
+        output_file = DEV_OUTPUT
+        candidates_file = os.path.join(self.model_path, CANDIDATES_SUFFIX)
+        scores_file = os.path.join(self.model_path, '%d-%s'%(k, SCORES_SUFFIX))
 
-        num_inputs = len(input_lines)
+        if test:
+            input_file = TEST_INPUT
+            output_file = TEST_OUTPUT
+            candidates_file = '%s.%s'%(candidates_file, TEST)
+            scores_file = '%s.%s'% (scores_file, TEST)
+
+        orig_input_lines, input_lines, orig_gold_lines, gold_lines = self.read_data(input_file, output_file)
+        self.total_lines = len(input_lines)
+        num_inputs = self.total_lines
+
         if num_lines > 0:
             num_inputs = num_lines
 
-        candidates_file = '%s.%s' % (self.model_path, CANDIDATES_SUFFIX)
-        scores_file = '%s.%d.%s' % (self.model_path, k, SCORES_SUFFIX)
-
-        logging.info('Num inputs: %d'%num_inputs)
+        self.selected_lines = num_inputs
+        logging.info('BLEU: Input_File:%s Output_File:%s Lines:%d/%d' % (input_file, output_file,
+                                                                         self.selected_lines, self.total_lines))
 
         all_hyp_file = os.path.join(self.model_path, ALL_HYP)
         all_ref_file = os.path.join(self.model_path, ALL_REF)
+        if test:
+            all_hyp_file = '%s.%s'%(all_hyp_file, TEST)
+            all_ref_file = '%s.%s'%(all_ref_file, TEST)
 
         fw_all_hyp = codecs.open(all_hyp_file, 'w', 'utf-8')
         fw_all_ref = codecs.open(all_ref_file, 'w', 'utf-8')
+        logging.info('BLEU: Model Dir: %s Ref_file:%s Hyp_File:%s'%(self.model_path, all_ref_file, all_hyp_file))
 
         perfect_matches = 0
 
         saved_scores = []
         save_results = False
+
         if os.path.exists(candidates_file):
+            save_results = False
             saved_candidates = pkl.load(open(candidates_file))
+            logging.warning('BLEU: Loaded %d scores from Saved_scores_file: %s'%(len(saved_candidates), candidates_file))
         else:
-            logging.warning('Candidates file missing:%s'%candidates_file)
+            logging.warning('BLEU: Saved_scores_file: %s not found!'%candidates_file)
             saved_candidates = []
             save_results = True
 
-        for index in range(num_inputs):
+        for index in range(self.selected_lines):
             gold_line = convert_phrase(orig_gold_lines[index].strip())
 
             unk_map = get_unk_map(orig_input_lines[index], input_lines[index])
@@ -490,11 +512,14 @@ class CandidateGenerator(object):
             if save_results:
                 nsu_result = self.get_seq2seq_candidates(input_seq=input_lines[index], rev_unk_map=unk_map,
                                                          missing=missing, kw_candidates=kw_candidates)
+
+                logging.info('BLEU Line: %d Gen (Tr:%d Q1:%d Q2:%d)'%(index, len(nsu_result.training_scores),
+                                                                         len(nsu_result.q1_scores), len(nsu_result.q2_scores)))
             else:
                 nsu_result = saved_candidates[index]
-                logging.info('Loaded Saved results Tr:%d Q1:%d Q2:%d'%(len(nsu_result.training_scores),
-                                                                       len(nsu_result.q1_scores),
-                                                                       len(nsu_result.q2_scores)))
+                logging.info('BLEU: Line: %d (Tr:%d Q1:%d Q2:%d)'%(index, len(nsu_result.training_scores),
+                                                                         len(nsu_result.q1_scores), len(nsu_result.q2_scores)))
+
 
             nsu_result.set_input(input_seq=orig_input_lines[index], input_seq_unk=input_lines[index], unk_map=unk_map,
                                  rev_unk_map=rev_unk_map, gold_line=gold_line)
@@ -502,7 +527,8 @@ class CandidateGenerator(object):
             if save_results:
                 saved_candidates.append(nsu_result)
 
-            final_scores = self.merge_and_sort_scores(nsu_result, missing, use_q1, use_q2, kw_candidates)
+            final_scores = merge_and_sort_scores(nsu_result, missing, use_q1, use_q2, kw_candidates)
+            logging.info('BLEU: Line: %d Scores:%d'%(index, len(final_scores)))
             self.add_all_bleu_scores(final_scores, gold_line)
 
             saved_scores.append(final_scores)
@@ -537,12 +563,9 @@ class CandidateGenerator(object):
         fw_all_hyp.close()
 
         bleu_score = execute_bleu_command(all_ref_file, all_hyp_file)
-        logging.info('Perfect Matches: %d/%d'%(perfect_matches, num_inputs))
-
         if save_results:
             pkl.dump(saved_candidates, open(candidates_file, 'w'))
         pkl.dump(saved_scores, open(scores_file, 'w'))
-
 
         return bleu_score, perfect_matches
 
@@ -557,15 +580,16 @@ def setup_args():
     parser.add_argument('-missing',dest='missing', default=False, action='store_true')
     parser.add_argument('-debug', dest='debug', default=False, action='store_true')
     parser.add_argument('-kw_candidates', dest='kw_candidates', default=False, action='store_true')
+    parser.add_argument('-test', dest='test', default=False, action='store_true')
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
     args = setup_args()
-    tm = CandidateGenerator(args.model_dir, debug=args.debug)
+    tm = CandidateGenerator(args.model_dir, debug=args.debug, kw_candidates=args.kw_candidates)
     logging.info(args)
 
-    bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k,
-                                            use_q1=args.use_q1, use_q2=args.use_q2, missing=args.missing, kw_candidates=args.kw_candidates)
+    bleu, perfect_matches = tm.compute_bleu(num_lines=args.l, k=args.k, use_q1=args.use_q1, use_q2=args.use_q2,
+                                            missing=args.missing, kw_candidates=args.kw_candidates, test=args.test)
 
-    logging.info('BLEU: %f Perfect Matches: %d'%(bleu, perfect_matches))
+    logging.info('BLEU: %f Perfect Matches: %d/%d'%(bleu, perfect_matches, tm.selected_lines))

@@ -19,6 +19,7 @@ UNK_SET = set(['Q', 'A'])
 SET_ANAPHORA = set(['he', 'she', 'it', 'they', 'them', 'his', 'her', 'that', 'its'])
 STOPW_FILE = 'stopw.txt'
 DEV = 'data.dev'
+TEST = 'data.test'
 
 ORIG_PREFIX = 'orig'
 INPUT_SUFFIX = 'en'
@@ -26,6 +27,10 @@ OUTPUT_SUFFIX = 'fr'
 
 DEV_INPUT = '%s.%s'%(DEV, INPUT_SUFFIX)
 DEV_OUTPUT = '%s.%s'%(DEV, OUTPUT_SUFFIX)
+
+TEST_INPUT = '%s.%s'%(TEST, INPUT_SUFFIX)
+TEST_OUTPUT = '%s.%s'%(TEST, OUTPUT_SUFFIX)
+
 
 ALL_REF = 'all_ref.txt'
 ALL_HYP = 'all_hyp.txt'
@@ -358,27 +363,22 @@ def merge_and_sort_scores(nsu_result, missing=False, use_q1=True, use_q2=True, k
 
     if missing and nsu_result.missing_scores is not None:
         final_candidates_set, new_scores = add_candidate_scores(nsu_result.missing_scores, final_candidates_set)
-        logging.info('Missing: %d'%len(new_scores))
         final_scores.extend(new_scores)
 
     if use_q1:
         final_candidates_set, new_scores = add_candidate_scores(nsu_result.q1_scores,
                                                                  final_candidates_set)
-        logging.info('Q1: %d' % len(new_scores))
         final_scores.extend(new_scores)
 
     if use_q2:
         final_candidates_set, new_scores = add_candidate_scores(nsu_result.q2_scores,
                                                                  final_candidates_set)
-        logging.info('Q2: %d' % len(new_scores))
         final_scores.extend(new_scores)
 
     if kw_candidates:
         final_candidates_set, new_scores = add_candidate_scores(nsu_result.kw_scores,
                                                                      final_candidates_set)
-        logging.info('KW: %d' % len(new_scores))
         final_scores.extend(new_scores)
 
     final_scores = sorted(final_scores, key=lambda x: x.seq2seq_score, reverse=True)
-    logging.info('Final: %d' % len(final_scores))
     return final_scores
