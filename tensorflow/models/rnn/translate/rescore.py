@@ -2,8 +2,8 @@ from language_model import LanguageModel
 import cPickle as pkl, codecs
 from candidate_generator import Score, NSUResult
 import tensorflow as tf, os
-from commons import merge_and_sort_scores, execute_bleu_command
-from commons import ALL_REF, ALL_HYP
+from commons import merge_and_sort_scores, execute_bleu_command, convert_phrase
+from commons import CANDIDATES_SUFFIX, TEST
 
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
@@ -12,9 +12,10 @@ import argparse
 
 DEFAULT_LM_MODEL = 'trained/lm/data-2M/models/qs_lm_large.ckpt'
 DEFAULT_LM_DATA  = 'trained/lm/data-2M/data'
-SEQ2SEQ_RESULTS = 'models.candidates.pkl'
 LM_SCORES = 'lm_scores.pkl'
 
+ALL_HYP = 'lm_hyp.txt'
+ALL_REF = 'lm_ref.txt'
 
 class FinalScore(object):
     def __init__(self, score, lm_score):
@@ -29,22 +30,28 @@ class FinalScore(object):
                                                         self.score.candidate_unk, self.score.seq2seq_score,
                                                               self.score.bleu_score, self.lm_score)
 
-
 def setup_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('model_dir', help='Trained seq2 model Directory')
     parser.add_argument('-index', default=-1, type=int)
     parser.add_argument('-weight', default=0.5, type=float)
     parser.add_argument('-k', default=100, type=int)
+    parser.add_argument('-test', dest='test', default=False, action='store_true')
     args = parser.parse_args()
     return args
 
 
 class Rescorer(object):
-    def __init__(self, seq2seq_dir, lm_data=DEFAULT_LM_DATA, lm_model=DEFAULT_LM_MODEL):
+    def __init__(self, seq2seq_dir, lm_data=DEFAULT_LM_DATA, lm_model=DEFAULT_LM_MODEL, test=False):
         self.lm = LanguageModel(lm_data, lm_model)
-        self.seq2seq_results = pkl.load(open(os.path.join(seq2seq_dir, SEQ2SEQ_RESULTS)))
         self.base_dir = seq2seq_dir
+        seq2seq_results_file = os.path.join(self.base_dir, CANDIDATES_SUFFIX)
+        if test:
+            seq2seq_results_file = '%s.%s'%(seq2seq_results_file, TEST)
+
+        self.seq2seq_results = pkl.load(open(seq2seq_results_file))
+        logging.info('Loaded %d saved seq2scores:%s'%(len(self.seq2seq_results), seq2seq_results_file))
+
 
     def get_lm_scores(self, score_index):
         final_scores = []
@@ -106,14 +113,16 @@ class Rescorer(object):
 def main():
     args = setup_args()
     logging.info(args)
-    rescorer = Rescorer(args.model_dir)
+    rescorer = Rescorer(args.model_dir, test=args.test)
 
     final_lm_scores = []
     lm_scores_file = os.path.join(rescorer.base_dir, LM_SCORES)
+    if args.test:
+        lm_scores_file = '%s.%s'%(lm_scores_file, TEST)
 
-    if os.path.exists(LM_SCORES):
+    if os.path.exists(lm_scores_file):
         final_lm_scores = pkl.load(open(lm_scores_file))
-        logging.info('Loaded %d LM_Scores from %s'%(len(final_lm_scores), LM_SCORES))
+        logging.info('Loaded %d LM_Scores from %s'%(len(final_lm_scores), lm_scores_file))
     else:
         if args.index == -1:
             num_lines = len(rescorer.seq2seq_results)
@@ -130,15 +139,20 @@ def main():
     reordered_lm_scores = rescorer.reorder_scores(final_lm_scores, weight=args.weight)
     all_hyp_file = os.path.join(rescorer.base_dir, ALL_HYP)
     all_ref_file = os.path.join(rescorer.base_dir, ALL_REF)
+    if args.test:
+        all_hyp_file = '%s.%s'%(all_hyp_file, TEST)
+        all_ref_file = '%s.%s' % (all_ref_file, TEST)
 
+    logging.info('BLEU: Ref_file: %s Hyp_file: %s'%(all_ref_file, all_hyp_file))
     fw_all_hyp = codecs.open(all_hyp_file, 'w', 'utf-8')
     fw_all_ref = codecs.open(all_ref_file, 'w', 'utf-8')
+
 
     for index, final_scores in enumerate(reordered_lm_scores):
         final_scores = final_scores[:args.k]
         best_bleu_score, best_bleu_index = rescorer._get_best_bleu_index(final_scores)
         logging.info('Index:%d Best_BLEU:%f(%d)'%(index, best_bleu_score, best_bleu_index))
-        fw_all_hyp.write(final_scores[best_bleu_index].score.candidate.strip() + '\n')
+        fw_all_hyp.write(convert_phrase(final_scores[best_bleu_index].score.candidate.strip()) + '\n')
         fw_all_ref.write(rescorer.seq2seq_results[index].gold_line.strip() + '\n')
 
     bleu_score = execute_bleu_command(all_ref_file, all_hyp_file)
