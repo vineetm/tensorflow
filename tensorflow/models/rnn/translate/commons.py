@@ -5,6 +5,7 @@ import tensorflow as tf
 
 logging = tf.logging
 
+
 NOT_SET = -99.0
 
 LEAVES='_LEAVES_'
@@ -358,8 +359,9 @@ def add_candidate_scores(scores, current_set):
 
 
 def merge_and_sort_scores(nsu_result, missing=False, use_q1=True, use_q2=True, kw_candidates=False):
-    final_scores = nsu_result.training_scores
+    #Initialize with training scores
     final_candidates_set = set()
+    final_candidates_set, final_scores = add_candidate_scores(nsu_result.training_scores, final_candidates_set)
 
     if missing and nsu_result.missing_scores is not None:
         final_candidates_set, new_scores = add_candidate_scores(nsu_result.missing_scores, final_candidates_set)
