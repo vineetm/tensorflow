@@ -12,7 +12,7 @@ import argparse
 
 DEFAULT_LM_MODEL = 'trained/lm/data-2M/models/qs_lm_large.ckpt'
 DEFAULT_LM_DATA  = 'trained/lm/data-2M/data'
-LM_SCORES = 'lm_scores.pkl'
+DEFAULT_LM_SCORES = 'lm_scores.pkl'
 
 ALL_HYP = 'lm_hyp.txt'
 ALL_REF = 'lm_ref.txt'
@@ -33,6 +33,9 @@ class FinalScore(object):
 def setup_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('model_dir', help='Trained seq2 model Directory')
+    parser.add_argument('-lm_model', help='Trained Language model', default=DEFAULT_LM_MODEL)
+    parser.add_argument('-lm_data', help='Language model data', default=DEFAULT_LM_DATA)
+    parser.add_argument('-lm_scores', help='LM scores file', default=DEFAULT_LM_SCORES)
     parser.add_argument('-index', default=-1, type=int)
     parser.add_argument('-weight', default=0.5, type=float)
     parser.add_argument('-k', default=100, type=int)
@@ -58,7 +61,7 @@ class Rescorer(object):
         seq2seq_scores = merge_and_sort_scores(self.seq2seq_results[score_index])
 
         for index, seq2seq_score in enumerate(seq2seq_scores):
-            lm_score = self.lm.compute_prob(seq2seq_score.candidate)
+            lm_score = self.lm.compute_prob(convert_phrase(seq2seq_score.candidate))
             final_score = FinalScore(seq2seq_score, lm_score)
             final_scores.append(final_score)
             if index % 100 == 0:
@@ -113,10 +116,10 @@ class Rescorer(object):
 def main():
     args = setup_args()
     logging.info(args)
-    rescorer = Rescorer(args.model_dir, test=args.test)
+    rescorer = Rescorer(args.model_dir, test=args.test, lm_data=args.lm_data, lm_model=args.lm_model)
 
     final_lm_scores = []
-    lm_scores_file = os.path.join(rescorer.base_dir, LM_SCORES)
+    lm_scores_file = os.path.join(rescorer.base_dir, args.lm_scores)
     if args.test:
         lm_scores_file = '%s.%s'%(lm_scores_file, TEST)
 
