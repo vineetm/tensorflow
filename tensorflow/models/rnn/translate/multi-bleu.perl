@@ -133,6 +133,7 @@ while(<STDIN>) {
 }
 my $brevity_penalty = 1;
 my $bleu = 0;
+my $bleu_2 = 0;
 
 my @bleu=();
 
@@ -157,6 +158,11 @@ $bleu = $brevity_penalty * exp((my_log( $bleu[1] ) +
 				my_log( $bleu[2] ) +
 				my_log( $bleu[3] ) +
 				my_log( $bleu[4] ) ) / 4) ;
+$bleu_2 = $brevity_penalty * exp((my_log( $bleu[1] ) +
+				my_log( $bleu[2] ) ) / 2) ;
+
+printf "BLEU_2 = %.2f\n", 100*$bleu_2;
+
 printf "BLEU = %.2f, %.1f/%.1f/%.1f/%.1f (BP=%.3f, ratio=%.3f, hyp_len=%d, ref_len=%d)\n",
     100*$bleu,
     100*$bleu[1],
