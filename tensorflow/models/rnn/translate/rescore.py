@@ -23,11 +23,11 @@ class FinalScore(object):
         self.lm_score = lm_score
 
     def reweight_score(self, weight, best_seq2seq_score, best_lm_score):
-        # self.weighted_score = ((1.0 - weight) * (self.lm_score/best_lm_score)) + \
-        #                       (weight * (self.score.seq2seq_score/best_seq2seq_score))
+        self.weighted_score = ((1.0 - weight) * (self.lm_score/best_lm_score)) + \
+                              (weight * (self.score.seq2seq_score/best_seq2seq_score))
 
-        self.weighted_score = ((1.0 - weight) * self.lm_score) + \
-                              (weight * self.score.seq2seq_score)
+        # self.weighted_score = ((1.0 - weight) * self.lm_score) + \
+        #                       (weight * self.score.seq2seq_score)
 
     def __str__(self):
         return 'C    : %s\nC_UNK: %s\nS:%f B:%f LM:%f' % (self.score.candidate,
