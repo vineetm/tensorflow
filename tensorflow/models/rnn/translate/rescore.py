@@ -22,8 +22,12 @@ class FinalScore(object):
         self.score = score
         self.lm_score = lm_score
 
-    def reweight_score(self, weight):
-        self.weighted_score = ((1.0 - weight) * self.lm_score) + (weight * self.score.seq2seq_score)
+    def reweight_score(self, weight, best_seq2seq_score, best_lm_score):
+        # self.weighted_score = ((1.0 - weight) * (self.lm_score/best_lm_score)) + \
+        #                       (weight * (self.score.seq2seq_score/best_seq2seq_score))
+
+        self.weighted_score = ((1.0 - weight) * self.lm_score) + \
+                              (weight * self.score.seq2seq_score)
 
     def __str__(self):
         return 'C    : %s\nC_UNK: %s\nS:%f B:%f LM:%f' % (self.score.candidate,
@@ -64,8 +68,6 @@ class Rescorer(object):
             lm_score = self.lm.compute_prob(convert_phrase(seq2seq_score.candidate))
             final_score = FinalScore(seq2seq_score, lm_score)
             final_scores.append(final_score)
-            if index % 100 == 0:
-                logging.info('LM_scores :%d' % index)
         return final_scores
 
     def _get_best_lm_index(self, lm_scores):
@@ -102,14 +104,20 @@ class Rescorer(object):
         return max_score, max_index
 
 
-    def reorder_scores(self, final_lm_scores, weight):
+    def reorder_scores(self, final_lm_scores, weight, k):
         final_sorted_scores = []
         for lm_scores in final_lm_scores:
+
+            best_seq2seq_score, best_seq2seq_index = self._get_best_seq2seq_index(lm_scores)
+            best_lm_score, best_lm_index = self._get_best_lm_index(lm_scores)
+
+            logging.info('Best seq2seq_score: %f LM_score: %f'%(best_seq2seq_score, best_lm_score))
             for lm_score in lm_scores:
-                lm_score.reweight_score(weight)
+                lm_score.reweight_score(weight, best_seq2seq_score, best_lm_score)
 
             sorted_scores = sorted(lm_scores, key = lambda t:t.weighted_score, reverse=True)
-            final_sorted_scores.append(sorted_scores)
+            logging.info('Top Score: %f'%sorted_scores[0].weighted_score)
+            final_sorted_scores.append(sorted_scores[:k])
         return final_sorted_scores
 
 
@@ -139,7 +147,7 @@ def main():
             logging.info('Line: %d lm_score done'%line_index)
         pkl.dump(final_lm_scores, open(lm_scores_file, 'w'))
 
-    reordered_lm_scores = rescorer.reorder_scores(final_lm_scores, weight=args.weight)
+    reordered_lm_scores = rescorer.reorder_scores(final_lm_scores, weight=args.weight, k=args.k)
     all_hyp_file = os.path.join(rescorer.base_dir, ALL_HYP)
     all_ref_file = os.path.join(rescorer.base_dir, ALL_REF)
     if args.test:
@@ -150,9 +158,7 @@ def main():
     fw_all_hyp = codecs.open(all_hyp_file, 'w', 'utf-8')
     fw_all_ref = codecs.open(all_ref_file, 'w', 'utf-8')
 
-
     for index, final_scores in enumerate(reordered_lm_scores):
-        final_scores = final_scores[:args.k]
         best_bleu_score, best_bleu_index = rescorer._get_best_bleu_index(final_scores)
         logging.info('Index:%d Best_BLEU:%f(%d)'%(index, best_bleu_score, best_bleu_index))
         fw_all_hyp.write(convert_phrase(final_scores[best_bleu_index].score.candidate.strip()) + '\n')

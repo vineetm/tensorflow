@@ -67,6 +67,7 @@ def get_bleu_score(reference, hypothesis, base_dir=None):
     ref_file = REF
     hyp_file = HYP
 
+
     if base_dir is not None:
         ref_file = os.path.join(base_dir, REF)
         hyp_file = os.path.join(base_dir, HYP)

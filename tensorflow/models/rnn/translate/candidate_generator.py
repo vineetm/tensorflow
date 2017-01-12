@@ -41,8 +41,8 @@ class Score(object):
     def set_seq2seq_score(self, prob):
         self.seq2seq_score = prob
 
-    def set_bleu_score(self, gold_line):
-        self.bleu_score = get_bleu_score(gold_line, convert_phrase(self.candidate))
+    def set_bleu_score(self, gold_line, base_dir):
+        self.bleu_score = get_bleu_score(gold_line, convert_phrase(self.candidate), base_dir=base_dir)
 
     def __str__(self):
         return 'C    : %s\nC_UNK: %s\nS:%f B:%f'%(self.candidate,
@@ -452,7 +452,7 @@ class CandidateGenerator(object):
 
     def add_all_bleu_scores(self, final_scores, gold_line):
         for index, score in enumerate(final_scores):
-            score.set_bleu_score(gold_line)
+            score.set_bleu_score(gold_line, base_dir=self.model_path)
 
 
     def compute_bleu(self, k=100, num_lines=-1, test=False, use_q1=True, use_q2=True,
