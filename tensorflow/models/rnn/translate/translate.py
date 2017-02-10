@@ -189,6 +189,7 @@ def print_samples(sess, model, data, rev_en_vocab, rev_fr_vocab, bucket_id, num_
     tf.logging.info('Src : %s'%' '.join([tf.compat.as_str(rev_en_vocab[output]) for output in src_tokens]))
     tf.logging.info('Gold: %s' % ' '.join([tf.compat.as_str(rev_fr_vocab[output]) for output in tgt_tokens]))
     tf.logging.info('Curr: %s' % ' '.join([tf.compat.as_str(rev_fr_vocab[output]) for output in output_tokens]))
+    tf.logging.info('')
 
 
 def train():
