@@ -46,7 +46,7 @@ from tensorflow.models.rnn.translate import seq2seq_model
 
 import cPickle as pkl
 tf.logging.set_verbosity(tf.logging.INFO)
-
+from seq2seq_model import Seq2SeqModel
 from data_utils import prepare_nsu_data
 from commons import CONFIG_FILE
 
@@ -151,7 +151,7 @@ def create_model(session, forward_only):
 
   """Create translation model and initialize or load parameters in session."""
   dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
-  model = seq2seq_model.Seq2SeqModel(
+  model = Seq2SeqModel(
       FLAGS.en_vocab_size,
       FLAGS.fr_vocab_size,
       _buckets,
@@ -171,6 +171,24 @@ def create_model(session, forward_only):
     print("Created model with fresh parameters.")
     session.run(tf.initialize_all_variables())
   return model
+
+
+def print_samples(sess, model, data, rev_en_vocab, rev_fr_vocab, bucket_id, num_samples=5):
+  encoder_inputs, decoder_inputs, target_weights = model.get_dev_batch(data, bucket_id, num_samples=64)
+  _, _, output_logits = model.step(sess, encoder_inputs, decoder_inputs,
+                                    target_weights, bucket_id, True)
+
+  for sample_id in xrange(num_samples):
+    output_tokens = []
+    for output_token_index in xrange(len(output_logits)):
+      output_tokens.append(np.argmax(output_logits[output_token_index][sample_id]))
+      if data_utils.EOS_ID in output_tokens:
+        output_tokens = output_tokens[:output_tokens.index(data_utils.EOS_ID)]
+
+    src_tokens, tgt_tokens = data[bucket_id][sample_id]
+    tf.logging.info('Src : %s'%' '.join([tf.compat.as_str(rev_en_vocab[output]) for output in src_tokens]))
+    tf.logging.info('Gold: %s' % ' '.join([tf.compat.as_str(rev_fr_vocab[output]) for output in tgt_tokens]))
+    tf.logging.info('Curr: %s' % ' '.join([tf.compat.as_str(rev_fr_vocab[output]) for output in output_tokens]))
 
 
 def train():
@@ -218,6 +236,14 @@ def train():
     #Track how many times we did not get better resuls in dev
     num_dev_unchanged = 0
 
+    # Load vocabularies.
+    en_vocab_path = os.path.join(FLAGS.data_dir,
+                                 "vocab%d.en" % FLAGS.en_vocab_size)
+    fr_vocab_path = os.path.join(FLAGS.data_dir,
+                                 "vocab%d.fr" % FLAGS.fr_vocab_size)
+    en_vocab, rev_en_vocab = data_utils.initialize_vocabulary(en_vocab_path)
+    _, rev_fr_vocab = data_utils.initialize_vocabulary(fr_vocab_path)
+
     while True:
       # Choose a bucket according to data distribution. We pick a random number
       # in [0, 1] and use the corresponding interval in train_buckets_scale.
@@ -262,6 +288,15 @@ def train():
               "inf")
           print("  eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
           iter_ppx += eval_ppx
+
+          tf.logging.info('Train Samples')
+          print_samples(sess, model, train_set, rev_en_vocab, rev_fr_vocab, bucket_id)
+          tf.logging.info('')
+
+          tf.logging.info('Dev Samples')
+          print_samples(sess, model, dev_set, rev_en_vocab, rev_fr_vocab, bucket_id)
+          tf.logging.info('')
+
         sys.stdout.flush()
 
         # Save checkpoint and zero timer and loss.
