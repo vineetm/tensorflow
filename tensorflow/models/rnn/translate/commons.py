@@ -32,7 +32,7 @@ DEV_OUTPUT = '%s.%s'%(DEV, OUTPUT_SUFFIX)
 TEST_INPUT = '%s.%s'%(TEST, INPUT_SUFFIX)
 TEST_OUTPUT = '%s.%s'%(TEST, OUTPUT_SUFFIX)
 
-
+EVAL_DATA = 'eval.sentences.pkl'
 ALL_REF = 'all_ref.txt'
 ALL_HYP = 'all_hyp.txt'
 

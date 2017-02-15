@@ -1,4 +1,4 @@
-from commons import CONFIG_FILE, STOPW_FILE
+from commons import CONFIG_FILE, STOPW_FILE, EVAL_DATA
 import os, logging, codecs
 import tensorflow as tf
 import cPickle as pkl
@@ -6,12 +6,12 @@ from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids, EOS_ID
 from collections import OrderedDict
 from nltk.tokenize import word_tokenize as tokenizer
-import numpy as np
+import numpy as np, argparse
 
 logging = tf.logging
 
 class SequenceGenerator(object):
-  def __init__(self, models_dir):
+  def __init__(self, models_dir, beam_size):
     config_file_path = os.path.join(models_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
 
@@ -21,6 +21,7 @@ class SequenceGenerator(object):
 
     #Create session
     self.session = tf.Session()
+    self.beam_size = beam_size
 
     #Setup parameters using saved config
     self.model_path = config['train_dir']
@@ -28,6 +29,10 @@ class SequenceGenerator(object):
     self.src_vocab_size = config['src_vocab_size']
     self.target_vocab_size = config['target_vocab_size']
     self._buckets = config['_buckets']
+
+    compute_prob = True
+    if self.beam_size == 1:
+      compute_prob = False
 
     #Create model
     self.model = Seq2SeqModel(
@@ -41,7 +46,7 @@ class SequenceGenerator(object):
       learning_rate=config['learning_rate'],
       learning_rate_decay_factor=config['learning_rate_decay_factor'],
       forward_only=True,
-      compute_prob=False)
+      compute_prob=compute_prob)
 
     #Restore Model from checkpoint file
     ckpt = tf.train.get_checkpoint_state(self.model_path)
@@ -91,12 +96,18 @@ class SequenceGenerator(object):
     return unk_map, rev_unk_map
 
 
-  def generate_output_sequence(self, input_sentence):
-    input_tokens = tokenizer(input_sentence)
-    unk_map, rev_unk_map = self.get_unk_map(input_tokens)
+  def convert_to_unk_sequence(self, sentence):
+    sentence = sentence.lower()
+    tokens = tokenizer(sentence)
+    unk_map, rev_unk_map = self.get_unk_map(tokens)
+    unk_sentence = self.replace_tokens(tokens, unk_map)
 
-    unk_sentence = self.replace_tokens(input_tokens, unk_map)
-    logging.info('Src: %s'%' '.join(input_tokens))
+    return unk_sentence, unk_map, rev_unk_map
+
+
+  def generate_output_sequence(self, input_sentence):
+    unk_sentence, unk_map, rev_unk_map = self.convert_to_unk_sequence(input_sentence)
+    logging.info('Src: %s'%' '.join(tokenizer(input_sentence.lower())))
     logging.info('UNK: %s' %unk_sentence)
 
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
@@ -127,3 +138,83 @@ class SequenceGenerator(object):
 
     output_sentence = self.replace_tokens(unk_output_sentence.split(), rev_unk_map)
     return output_sentence
+
+
+  def generate_outputs(self, suffix):
+    eval_sentences = pkl.load(open(EVAL_DATA))
+    logging.info('Num Eval Sentences: %d'%len(eval_sentences))
+
+    output_sentences = [(input_sentence, self.generate_output_sequence(input_sentence)) for input_sentence in eval_sentences]
+    pkl.dump(output_sentences, open('%s.%s.pkl'%('results', suffix), 'w'))
+
+  def convert_to_prob(self, logit):
+    exp_logit = np.exp(logit)
+    return exp_logit / np.sum(exp_logit)
+
+  def set_output_tokens(self, output_token_ids, decoder_inputs):
+    for index in range(len(output_token_ids)):
+      decoder_inputs[index + 1] = np.array([output_token_ids[index]], dtype=np.float32)
+
+
+  def get_new_work(self, encoder_inputs, decoder_inputs, target_weights, bucket_id, fixed_tokens, curr_prob):
+    self.set_output_tokens(fixed_tokens, decoder_inputs)
+    _, _, output_logits = self.model.step(self.session, encoder_inputs, decoder_inputs, target_weights, bucket_id, True)
+
+    probs = self.convert_to_prob(output_logits[len(fixed_tokens)][0])
+    sorted_probs = sorted([(index, probs[index]) for index in xrange(len(probs))], key=lambda x: x[1],
+                            reverse=True)
+
+    new_work = []
+
+    for part in sorted_probs:
+      new_token = self.rev_fr_vocab[part[0]]
+      new_tokens = []
+      new_tokens.extend(fixed_tokens)
+      new_tokens.append(new_token)
+      new_sentence = ' '.join(new_tokens)
+      new_work.append([new_sentence, part[1] * curr_prob])
+    return new_work[:self.beam_size]
+
+
+  def generate_topk_sequences(self, sentence):
+    if self.beam_size == 1:
+      return self.generate_output_sequence(sentence)
+
+    unk_sentence, unk_map, rev_unk_map = self.convert_to_unk_sequence(sentence)
+    token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
+    logging.info('Input: %s'%' '.join(tokenizer(sentence.lower())))
+    logging.info('UNK  :%s'%unk_sentence)
+
+    bucket_ids = [b for b in xrange(len(self._buckets))
+                      if self._buckets[b][0] > len(token_ids)]
+
+    if len(bucket_ids) == 0:
+      bucket_id = len(self._buckets) - 1
+    else:
+      bucket_id = min(bucket_ids)
+
+    encoder_inputs, decoder_inputs, target_weights = self.model.get_batch(
+            {bucket_id: [(token_ids, [])]}, bucket_id)
+
+    #Initialize with empty fixed tokens
+    rem_work = self.get_new_work(encoder_inputs, decoder_inputs, target_weights, bucket_id, [], 1.0)
+    logging.info(rem_work)
+
+
+def setup_args():
+  parser = argparse.ArgumentParser()
+  parser.add_argument('model_dir', help='Trained Model Directory')
+  parser.add_argument('-beam_size', dest='beam_size', default=8, type=int, help='Beam Search size')
+  parser.add_argument('results',)
+  args = parser.parse_args()
+  return args
+
+
+def main():
+  args = setup_args()
+  logging.info(args)
+  sg = SequenceGenerator(args.model_dir, args.beam_size)
+  sg.generate_outputs(args.results)
+
+if __name__ == '__main__':
+    main()
