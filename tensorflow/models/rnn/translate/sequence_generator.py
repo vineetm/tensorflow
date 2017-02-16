@@ -167,12 +167,11 @@ class SequenceGenerator(object):
     new_work = []
 
     for part in sorted_probs:
-      new_token = self.rev_fr_vocab[part[0]]
       new_tokens = []
       new_tokens.extend(fixed_tokens)
-      new_tokens.append(new_token)
-      new_sentence = ' '.join(new_tokens)
-      new_work.append([new_sentence, part[1] * curr_prob])
+      new_tokens.append(part[0])
+      new_tokens = [self.rev_fr_vocab[token] for token in new_tokens]
+      new_work.append((' '.join(new_tokens), part[1] * curr_prob))
     return new_work[:self.beam_size]
 
 
@@ -199,6 +198,36 @@ class SequenceGenerator(object):
     #Initialize with empty fixed tokens
     rem_work = self.get_new_work(encoder_inputs, decoder_inputs, target_weights, bucket_id, [], 1.0)
     logging.info(rem_work)
+    final_translations = []
+    while True:
+      if len(rem_work) == 0:
+        final_translations = [(self.replace_tokens(final_translation[0].split(), rev_unk_map), final_translation[1]) for final_translation in final_translations]
+        final_translations = sorted(final_translations, key=lambda x: x[1], reverse=True)[:self.beam_size]
+        return final_translations
+
+      #Remove top of work
+      curr_work = rem_work[0]
+      del rem_work[0]
+
+
+      curr_sentence, curr_prob = curr_work
+      curr_tokens = [self.fr_vocab[token] for token in curr_sentence.split()]
+
+      if curr_tokens[-1] == self.rev_fr_vocab[EOS_ID]:
+        final_translations.append((' '.join(curr_tokens[:-1]), curr_prob))
+        continue
+
+      #Check if we received an EOS or went past length
+      if len(curr_tokens) == self._buckets[bucket_id][1] or curr_tokens[-1] == EOS_ID:
+        final_translations.append(curr_work)
+        continue
+
+
+
+      new_work = self.get_new_work(encoder_inputs, decoder_inputs, target_weights, bucket_id, curr_tokens, curr_prob)
+      rem_work.extend(new_work)
+      rem_work = sorted(rem_work, key=lambda x:x[1], reverse=True)
+      rem_work = rem_work[:self.beam_size]
 
 
 def setup_args():
