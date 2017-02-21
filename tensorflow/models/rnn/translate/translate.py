@@ -174,7 +174,7 @@ def create_model(session, forward_only):
 
 
 def print_samples(sess, model, data, rev_en_vocab, rev_fr_vocab, bucket_id, num_samples=5):
-  encoder_inputs, decoder_inputs, target_weights = model.get_dev_batch(data, bucket_id, num_samples=model.batch_size)
+  encoder_inputs, decoder_inputs, target_weights = model.get_dev_batch(data, bucket_id, num_samples=num_samples)
   _, _, output_logits = model.step(sess, encoder_inputs, decoder_inputs,
                                     target_weights, bucket_id, True)
 

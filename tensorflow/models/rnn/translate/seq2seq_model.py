@@ -27,6 +27,7 @@ import tensorflow as tf
 
 from tensorflow.models.rnn.translate import data_utils
 
+logging = tf.logging
 
 class Seq2SeqModel(object):
   """Sequence-to-sequence model with attention and for multiple buckets.
@@ -354,9 +355,15 @@ class Seq2SeqModel(object):
 
     # Get a random batch of encoder and decoder inputs from data,
     # pad them if needed, reverse encoder inputs and add GO to decoder.
-    for sample_id in xrange(num_samples):
+    for sample_id in xrange(self.batch_size):
       # encoder_input, decoder_input = random.choice(data[bucket_id])
-      encoder_input, decoder_input = data[bucket_id][sample_id]
+
+
+      if sample_id < num_samples:
+        encoder_input, decoder_input = data[bucket_id][sample_id]
+      else:
+        encoder_input = [0]
+        decoder_input = [0]
 
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
@@ -374,17 +381,17 @@ class Seq2SeqModel(object):
     for length_idx in xrange(encoder_size):
       batch_encoder_inputs.append(
           np.array([encoder_inputs[batch_idx][length_idx]
-                    for batch_idx in xrange(num_samples)], dtype=np.int32))
+                    for batch_idx in xrange(self.batch_size)], dtype=np.int32))
 
     # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
     for length_idx in xrange(decoder_size):
       batch_decoder_inputs.append(
           np.array([decoder_inputs[batch_idx][length_idx]
-                    for batch_idx in xrange(num_samples)], dtype=np.int32))
+                    for batch_idx in xrange(self.batch_size)], dtype=np.int32))
 
       # Create target_weights to be 0 for targets that are padding.
-      batch_weight = np.ones(num_samples, dtype=np.float32)
-      for batch_idx in xrange(num_samples):
+      batch_weight = np.ones(self.batch_size, dtype=np.float32)
+      for batch_idx in xrange(self.batch_size):
         # We set weight to 0 if the corresponding target is a PAD symbol.
         # The corresponding target is decoder_input shifted by 1 forward.
         if length_idx < decoder_size - 1:

@@ -175,14 +175,20 @@ class SequenceGenerator(object):
     return new_work[:self.beam_size]
 
 
-  def generate_topk_sequences(self, sentence):
+  def generate_topk_sequences(self, sentence, unk_tx=True):
     if self.beam_size == 1:
       return self.generate_output_sequence(sentence)
 
-    unk_sentence, unk_map, rev_unk_map = self.convert_to_unk_sequence(sentence)
+    if unk_tx:
+      unk_sentence, unk_map, rev_unk_map = self.convert_to_unk_sequence(sentence)
+    else:
+      unk_sentence = sentence
+
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
     logging.info('Input: %s'%' '.join(tokenizer(sentence.lower())))
-    logging.info('UNK  :%s'%unk_sentence)
+
+    if unk_tx:
+      logging.info('UNK  :%s'%unk_sentence)
 
     bucket_ids = [b for b in xrange(len(self._buckets))
                       if self._buckets[b][0] > len(token_ids)]
@@ -201,7 +207,8 @@ class SequenceGenerator(object):
     final_translations = []
     while True:
       if len(rem_work) == 0:
-        final_translations = [(self.replace_tokens(final_translation[0].split(), rev_unk_map), final_translation[1]) for final_translation in final_translations]
+        if unk_tx:
+          final_translations = [(self.replace_tokens(final_translation[0].split(), rev_unk_map), final_translation[1]) for final_translation in final_translations]
         final_translations = sorted(final_translations, key=lambda x: x[1], reverse=True)[:self.beam_size]
         return final_translations
 
