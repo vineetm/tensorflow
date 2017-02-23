@@ -105,16 +105,27 @@ class SequenceGenerator(object):
     return unk_sentence, unk_map, rev_unk_map
 
 
-  def generate_output_sequence(self, input_sentence):
-    unk_sentence, unk_map, rev_unk_map = self.convert_to_unk_sequence(input_sentence)
-    logging.info('Src: %s'%' '.join(tokenizer(input_sentence.lower())))
-    logging.info('UNK: %s' %unk_sentence)
+  def generate_output_sequence(self, sentence, unk_tx=True):
+    sentence = sentence.lower()
+    logging.debug('Src: %s' % ' '.join(tokenizer(sentence)))
+
+    if unk_tx:
+      unk_sentence, unk_map, rev_unk_map = self.convert_to_unk_sequence(sentence)
+      logging.debug('UNK: %s' % unk_sentence)
+    else:
+      unk_sentence = sentence
 
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
-    logging.info('Tkn: %s'%str(token_ids))
+    logging.debug('Tkn: %s'%str(token_ids))
 
-    bucket_id = min([b for b in xrange(len(self._buckets))
+    if len(token_ids) >= self._buckets[-1][0]:
+      token_ids = token_ids[:self._buckets[-1][0]-1]
+      bucket_id = len(self._buckets) - 1
+    else :
+      bucket_id = min([b for b in xrange(len(self._buckets))
                      if self._buckets[b][0] > len(token_ids)])
+
+    # logging.info('Bucket_ID: %d len_tokens:%d'%(bucket_id, len(token_ids)))
     # Get a 1-element batch to feed the sentence to the model.
     encoder_inputs, decoder_inputs, target_weights = self.model.get_batch(
       {bucket_id: [(token_ids, [])]}, bucket_id)
@@ -134,9 +145,12 @@ class SequenceGenerator(object):
         output_tokens = output_tokens[:output_tokens.index(EOS_ID)]
 
     unk_output_sentence = " ".join([tf.compat.as_str(self.rev_fr_vocab[output]) for output in output_tokens])
-    logging.info(unk_output_sentence)
+    logging.debug(unk_output_sentence)
 
-    output_sentence = self.replace_tokens(unk_output_sentence.split(), rev_unk_map)
+    if unk_tx:
+      output_sentence = self.replace_tokens(unk_output_sentence.split(), rev_unk_map)
+    else:
+      output_sentence = unk_output_sentence
     return output_sentence
 
 
