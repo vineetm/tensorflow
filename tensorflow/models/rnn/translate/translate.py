@@ -41,13 +41,13 @@ import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
-from tensorflow.models.rnn.translate import data_utils
-from tensorflow.models.rnn.translate import seq2seq_model
+# from tensorflow.models.rnn.translate import data_utils
+# from tensorflow.models.rnn.translate import seq2seq_model
 
 import cPickle as pkl
 tf.logging.set_verbosity(tf.logging.INFO)
 from seq2seq_model import Seq2SeqModel
-from data_utils import prepare_nsu_data
+from data_utils import prepare_nsu_data, EOS_ID, initialize_vocabulary, sentence_to_token_ids, PAD_ID
 from commons import CONFIG_FILE
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
@@ -114,7 +114,7 @@ def read_data(source_path, target_path, max_size=None):
           sys.stdout.flush()
         source_ids = [int(x) for x in source.split()]
         target_ids = [int(x) for x in target.split()]
-        target_ids.append(data_utils.EOS_ID)
+        target_ids.append(EOS_ID)
         for bucket_id, (source_size, target_size) in enumerate(_buckets):
           if len(source_ids) < source_size and len(target_ids) < target_size:
             data_set[bucket_id].append([source_ids, target_ids])
@@ -169,7 +169,7 @@ def create_model(session, forward_only):
     model.saver.restore(session, ckpt.model_checkpoint_path)
   else:
     print("Created model with fresh parameters.")
-    session.run(tf.initialize_all_variables())
+    session.run(tf.global_variables_initializer())
   return model
 
 
@@ -182,8 +182,8 @@ def print_samples(sess, model, data, rev_en_vocab, rev_fr_vocab, bucket_id, num_
     output_tokens = []
     for output_token_index in xrange(len(output_logits)):
       output_tokens.append(np.argmax(output_logits[output_token_index][sample_id]))
-      if data_utils.EOS_ID in output_tokens:
-        output_tokens = output_tokens[:output_tokens.index(data_utils.EOS_ID)]
+      if EOS_ID in output_tokens:
+        output_tokens = output_tokens[:output_tokens.index(EOS_ID)]
 
     src_tokens, tgt_tokens = data[bucket_id][sample_id]
     tf.logging.info('Src : %s'%' '.join([tf.compat.as_str(rev_en_vocab[output]) for output in src_tokens]))
@@ -207,6 +207,7 @@ def train():
   # cf.gpu_options.allow_growth = True
 
 
+  # with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
   with tf.Session() as sess:
     # Create model.
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
@@ -242,8 +243,8 @@ def train():
                                  "vocab%d.en" % FLAGS.en_vocab_size)
     fr_vocab_path = os.path.join(FLAGS.data_dir,
                                  "vocab%d.fr" % FLAGS.fr_vocab_size)
-    en_vocab, rev_en_vocab = data_utils.initialize_vocabulary(en_vocab_path)
-    _, rev_fr_vocab = data_utils.initialize_vocabulary(fr_vocab_path)
+    en_vocab, rev_en_vocab = initialize_vocabulary(en_vocab_path)
+    _, rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
     while True:
       # Choose a bucket according to data distribution. We pick a random number
@@ -312,7 +313,7 @@ def train():
 
         else:
           num_dev_unchanged += 1
-          if num_dev_unchanged >= 50:
+          if num_dev_unchanged >= 500:
             tf.logging.info('Early EXIT, dev unchanged:%d'%num_dev_unchanged)
             return
 
@@ -330,8 +331,8 @@ def decode():
                                  "vocab%d.en" % FLAGS.en_vocab_size)
     fr_vocab_path = os.path.join(FLAGS.data_dir,
                                  "vocab%d.fr" % FLAGS.fr_vocab_size)
-    en_vocab, _ = data_utils.initialize_vocabulary(en_vocab_path)
-    _, rev_fr_vocab = data_utils.initialize_vocabulary(fr_vocab_path)
+    en_vocab, _ = initialize_vocabulary(en_vocab_path)
+    _, rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
     # Decode from standard input.
     sys.stdout.write("> ")
@@ -339,7 +340,7 @@ def decode():
     sentence = sys.stdin.readline()
     while sentence:
       # Get token-ids for the input sentence.
-      token_ids = data_utils.sentence_to_token_ids(tf.compat.as_bytes(sentence), en_vocab)
+      token_ids = sentence_to_token_ids(tf.compat.as_bytes(sentence), en_vocab)
       # Which bucket does it belong to?
       bucket_id = min([b for b in xrange(len(_buckets))
                        if _buckets[b][0] > len(token_ids)])
@@ -352,8 +353,8 @@ def decode():
       # This is a greedy decoder - outputs are just argmaxes of output_logits.
       outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits]
       # If there is an EOS symbol in outputs, cut them at that point.
-      if data_utils.EOS_ID in outputs:
-        outputs = outputs[:outputs.index(data_utils.EOS_ID)]
+      if EOS_ID in outputs:
+        outputs = outputs[:outputs.index(EOS_ID)]
       # Print out French sentence corresponding to outputs.
       print(" ".join([tf.compat.as_str(rev_fr_vocab[output]) for output in outputs]))
       print("> ", end="")
