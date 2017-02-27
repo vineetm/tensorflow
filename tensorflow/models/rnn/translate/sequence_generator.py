@@ -50,7 +50,7 @@ class SequenceGenerator(object):
 
     #Restore Model from checkpoint file
     ckpt = tf.train.get_checkpoint_state(self.model_path)
-    if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+    if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
       logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
       self.model.saver.restore(self.session, ckpt.model_checkpoint_path)
     else:
