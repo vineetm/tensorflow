@@ -6,13 +6,15 @@ from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids, EOS_ID
 from collections import OrderedDict
 from nltk.tokenize import word_tokenize as tokenizer
+from commons import execute_bleu_command
 import numpy as np, argparse
 
 logging = tf.logging
 
 class SequenceGenerator(object):
-  def __init__(self, models_dir, beam_size):
-    config_file_path = os.path.join(models_dir, CONFIG_FILE)
+  def __init__(self, args):
+    self.args = args
+    config_file_path = os.path.join(self.args.model_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
 
     logging.info('Loading Pre-trained seq2model:%s' % config_file_path)
@@ -21,7 +23,7 @@ class SequenceGenerator(object):
 
     #Create session
     self.session = tf.Session()
-    self.beam_size = beam_size
+    self.beam_size = self.args.beam_size
 
     #Setup parameters using saved config
     self.model_path = config['train_dir']
@@ -263,6 +265,34 @@ class SequenceGenerator(object):
       rem_work = rem_work[:self.beam_size]
 
 
+  '''
+  Get BLEU score for each hypothesis
+  '''
+  def get_best_bleu_score(self, list_hypothesis, references):
+    best_bleu = 0.0
+    best_index = 0
+
+    #Write all the references
+    ref_string = ''
+    for index, reference in enumerate(references):
+      ref_file = os.path.join(self.args.eval_dir, 'ref%d.txt'%index)
+      with codecs.open(ref_file, 'w', 'utf-8') as f:
+        f.write(reference.strip() + '\n')
+      ref_string += ' %s'%ref_file
+
+    hyp_file = os.path.join(self.args.eval_dir, 'hyp.txt')
+    for index, hypothesis in enumerate(list_hypothesis):
+      with codecs.open(hyp_file, 'w', 'utf-8') as f:
+        f.write(hypothesis.strip() + '\n')
+
+      bleu = execute_bleu_command(ref_string, hyp_file)
+      if bleu > best_bleu:
+        best_bleu = bleu
+        best_index = index
+
+    return best_bleu, best_index
+
+
   def save_results(self, results_file):
     eval_sentences = pkl.load(open('eval.pkl'))
     results = []
@@ -279,7 +309,8 @@ def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('model_dir', help='Trained Model Directory')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
-  parser.add_argument('results',)
+  parser.add_argument('-eval_dir', dest='eval_dir', default='eval', help='Eval results directory')
+  # parser.add_argument('results',)
   args = parser.parse_args()
   return args
 
@@ -287,8 +318,9 @@ def setup_args():
 def main():
   args = setup_args()
   logging.info(args)
-  sg = SequenceGenerator(args.model_dir, args.beam_size)
-  sg.save_results(args.results)
+  sg = SequenceGenerator(args)
+  logging.info(sg.get_best_bleu_score(['how can my laptop be fixed ?'], ['how can my fix my laptop ?', 'how can my laptop ?']))
+  # sg.save_results(args.results)
 
 
 if __name__ == '__main__':
