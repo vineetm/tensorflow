@@ -169,6 +169,20 @@ class SequenceGenerator(object):
     for index in range(len(output_token_ids)):
       decoder_inputs[index + 1] = np.array([output_token_ids[index]], dtype=np.float32)
 
+  def cleanup_final_translations(self, final_translations, source_sentence):
+    sentences_set = set()
+    sentences_set.add(source_sentence)
+
+    cleaned_translations = []
+    for sentence, prob in final_translations:
+      sentence = ' '.join(sentence.split()[:-1])
+      if sentence not in sentences_set:
+
+        cleaned_translations.append((sentence, prob))
+        sentences_set.add(sentence)
+
+    return cleaned_translations
+
 
   def get_new_work(self, encoder_inputs, decoder_inputs, target_weights, bucket_id, fixed_tokens, curr_prob):
     self.set_output_tokens(fixed_tokens, decoder_inputs)
@@ -199,7 +213,8 @@ class SequenceGenerator(object):
       unk_sentence = sentence
 
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
-    logging.info('Input: %s'%' '.join(tokenizer(sentence.lower())))
+    sentence_lc = ' '.join(tokenizer(sentence.lower()))
+    logging.info('Input: %s'%sentence_lc)
 
     if unk_tx:
       logging.info('UNK  :%s'%unk_sentence)
@@ -224,12 +239,11 @@ class SequenceGenerator(object):
         if unk_tx:
           final_translations = [(self.replace_tokens(final_translation[0].split(), rev_unk_map), final_translation[1]) for final_translation in final_translations]
         final_translations = sorted(final_translations, key=lambda x: x[1], reverse=True)[:self.beam_size]
-        return final_translations
+        return self.cleanup_final_translations(final_translations, sentence_lc)
 
       #Remove top of work
       curr_work = rem_work[0]
       del rem_work[0]
-
 
       curr_sentence, curr_prob = curr_work
       curr_tokens = [self.fr_vocab[token] for token in curr_sentence.split()]
@@ -243,18 +257,28 @@ class SequenceGenerator(object):
         final_translations.append(curr_work)
         continue
 
-
-
       new_work = self.get_new_work(encoder_inputs, decoder_inputs, target_weights, bucket_id, curr_tokens, curr_prob)
       rem_work.extend(new_work)
       rem_work = sorted(rem_work, key=lambda x:x[1], reverse=True)
       rem_work = rem_work[:self.beam_size]
 
 
+  def save_results(self, results_file):
+    eval_sentences = pkl.load(open('eval.pkl'))
+    results = []
+
+    for idx, sentence in enumerate(eval_sentences):
+      results.append(self.generate_topk_sequences(sentence))
+      logging.info('Done id:%d'%idx)
+
+
+    pkl.dump(results, open(results_file, 'w'))
+
+
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('model_dir', help='Trained Model Directory')
-  parser.add_argument('-beam_size', dest='beam_size', default=8, type=int, help='Beam Search size')
+  parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
   parser.add_argument('results',)
   args = parser.parse_args()
   return args
@@ -264,7 +288,8 @@ def main():
   args = setup_args()
   logging.info(args)
   sg = SequenceGenerator(args.model_dir, args.beam_size)
-  sg.generate_outputs(args.results)
+  sg.save_results(args.results)
+
 
 if __name__ == '__main__':
     main()
