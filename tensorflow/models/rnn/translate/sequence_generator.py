@@ -8,11 +8,12 @@ from collections import OrderedDict
 from nltk.tokenize import word_tokenize as tokenizer
 from commons import execute_bleu_command
 import numpy as np, argparse
+from progress.bar import Bar
 
 logging = tf.logging
 
 class SequenceGenerator(object):
-  def __init__(self, model_dir, beam_size=16, eval_dir=None):
+  def __init__(self, model_dir, eval_file=None, beam_size=16, eval_dir=None):
 
     config_file_path = os.path.join(model_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
@@ -25,6 +26,7 @@ class SequenceGenerator(object):
     self.session = tf.Session()
     self.beam_size = beam_size
     self.eval_dir = eval_dir
+    self.eval_file = eval_file
 
     #Setup parameters using saved config
     self.model_path = config['train_dir']
@@ -217,10 +219,10 @@ class SequenceGenerator(object):
 
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
     sentence_lc = ' '.join(tokenizer(sentence.lower()))
-    logging.info('Input: %s'%sentence_lc)
-
-    if unk_tx:
-      logging.info('UNK  :%s'%unk_sentence)
+    # logging.info('Input: %s'%sentence_lc)
+    #
+    # if unk_tx:
+    #   logging.info('UNK  :%s'%unk_sentence)
 
     bucket_ids = [b for b in xrange(len(self._buckets))
                       if self._buckets[b][0] > len(token_ids)]
@@ -235,7 +237,7 @@ class SequenceGenerator(object):
 
     #Initialize with empty fixed tokens
     rem_work = self.get_new_work(encoder_inputs, decoder_inputs, target_weights, bucket_id, [], 1.0)
-    logging.info(rem_work)
+    # logging.info(rem_work)
     final_translations = []
     while True:
       if len(rem_work) == 0:
@@ -293,25 +295,66 @@ class SequenceGenerator(object):
 
     return best_bleu, best_index
 
+  def get_corpus_bleu_score(self, max_refs):
+    ref_file_names = [os.path.join(self.eval_dir, 'all_ref%d.txt'%index) for index in range(max_refs)]
+    ref_fw = [codecs.open(file_name, 'w', 'utf-8') for file_name in ref_file_names]
 
-  def save_results(self, results_file):
-    eval_sentences = pkl.load(open('eval.pkl'))
-    results = []
+    hyp_file = os.path.join(self.eval_dir, 'all_hyp.txt')
+    hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
 
-    for idx, sentence in enumerate(eval_sentences):
-      results.append(self.generate_topk_sequences(sentence))
-      logging.info('Done id:%d'%idx)
+    inp_fw = codecs.open(os.path.join(self.eval_dir, 'all_inputs.txt'), 'w', 'utf-8')
+    skipped_noq = 0
+    skipped_noref = 0
+    ref_str = ' '.join(ref_file_names)
 
+    bar = Bar('computing bleu', max=100)
+    for line in codecs.open(self.eval_file, 'r', 'utf-8'):
+      parts = line.split('\t')
 
-    pkl.dump(results, open(results_file, 'w'))
+      bar.next()
+      #Skip if first part is not a question
+      if parts[0][:2] != 'q:':
+        skipped_noq += 1
+        continue
+
+      input_sentence = ' '.join(tokenizer(parts[0][2:]))
+
+      references = [part[2:] for part in parts[1:] if part[:2] == 'q:'][:max_refs]
+
+      rem_ref = max_refs - len(references)
+      references.extend(['' for _ in range(rem_ref)])
+      # logging.info('Ref: %s'%references)
+      references = [' '.join(tokenizer(reference)) for reference in references]
+
+      #Skip if no references are found!
+      if len(references) == 0:
+        skipped_noref += 1
+        continue
+
+      inp_fw.write(input_sentence.strip() + '\n')
+      all_hypothesis = self.generate_topk_sequences(input_sentence)
+      list_hypothesis = [hyp[0] for hyp in all_hypothesis]
+
+      best_bleu, best_index = self.get_best_bleu_score(list_hypothesis, references)
+      hyp_fw.write(list_hypothesis[best_index].strip() + '\n')
+      for index, reference in enumerate(references):
+        ref_fw[index].write(reference.strip() + '\n')
+
+    hyp_fw.close()
+    [fw.close() for fw in ref_fw]
+    final_bleu = execute_bleu_command(ref_str, hyp_file)
+    logging.info('Final BLEU: %.2f'%final_bleu)
+    logging.info('Skipped: No_q:%d No_ref:%d'%(skipped_noq, skipped_noref))
 
 
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('model_dir', help='Trained Model Directory')
+  parser.add_argument('eval_file', help='Source and References file')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
+  parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
   parser.add_argument('-eval_dir', dest='eval_dir', default='eval', help='Eval results directory')
-  # parser.add_argument('results',)
+
   args = parser.parse_args()
   return args
 
@@ -319,8 +362,9 @@ def setup_args():
 def main():
   args = setup_args()
   logging.info(args)
-  sg = SequenceGenerator(args)
-  logging.info(sg.get_best_bleu_score(['how can my laptop be fixed ?'], ['how can my fix my laptop ?', 'how can my laptop ?']))
+  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, beam_size=args.beam_size, eval_dir=args.eval_dir)
+  # logging.info(sg.get_best_bleu_score(['how can my laptop be fixed ?'], ['how can my fix my laptop ?', 'how can my laptop ?']))
+  sg.get_corpus_bleu_score(args.max_refs)
   # sg.save_results(args.results)
 
 
