@@ -11,6 +11,7 @@ import numpy as np, argparse
 from progress.bar import Bar
 
 logging = tf.logging
+logging.set_verbosity(logging.INFO)
 
 class SequenceGenerator(object):
   def __init__(self, model_dir, eval_file=None, beam_size=16, eval_dir=None):
@@ -295,7 +296,7 @@ class SequenceGenerator(object):
 
     return best_bleu, best_index
 
-  def get_corpus_bleu_score(self, max_refs):
+  def get_corpus_bleu_score(self, max_refs, k, unk_tx):
     ref_file_names = [os.path.join(self.eval_dir, 'all_ref%d.txt'%index) for index in range(max_refs)]
     ref_fw = [codecs.open(file_name, 'w', 'utf-8') for file_name in ref_file_names]
 
@@ -307,7 +308,7 @@ class SequenceGenerator(object):
     skipped_noref = 0
     ref_str = ' '.join(ref_file_names)
 
-    bar = Bar('computing bleu', max=100)
+    bar = Bar('computing bleu', max=5000)
     for line in codecs.open(self.eval_file, 'r', 'utf-8'):
       parts = line.split('\t')
 
@@ -332,8 +333,8 @@ class SequenceGenerator(object):
         continue
 
       inp_fw.write(input_sentence.strip() + '\n')
-      all_hypothesis = self.generate_topk_sequences(input_sentence)
-      list_hypothesis = [hyp[0] for hyp in all_hypothesis]
+      all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx)
+      list_hypothesis = [hyp[0] for hyp in all_hypothesis][:k]
 
       best_bleu, best_index = self.get_best_bleu_score(list_hypothesis, references)
       hyp_fw.write(list_hypothesis[best_index].strip() + '\n')
@@ -350,10 +351,12 @@ class SequenceGenerator(object):
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('model_dir', help='Trained Model Directory')
-  parser.add_argument('eval_file', help='Source and References file')
+  parser.add_argument('eval_dir', help='Eval results directory')
+  parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='/Users/vineet/repos/research/data/wikianswers/eval.data')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
   parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
-  parser.add_argument('-eval_dir', dest='eval_dir', default='eval', help='Eval results directory')
+  parser.add_argument('-k', dest='k', default=16, type=int, help='Maximum references')
+  parser.add_argument('-no_unk_tx', dest='no_unk_tx', default=False, action='store_true')
 
   args = parser.parse_args()
   return args
@@ -364,7 +367,7 @@ def main():
   logging.info(args)
   sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, beam_size=args.beam_size, eval_dir=args.eval_dir)
   # logging.info(sg.get_best_bleu_score(['how can my laptop be fixed ?'], ['how can my fix my laptop ?', 'how can my laptop ?']))
-  sg.get_corpus_bleu_score(args.max_refs)
+  sg.get_corpus_bleu_score(args.max_refs, args.k, not args.no_unk_tx)
   # sg.save_results(args.results)
 
 
