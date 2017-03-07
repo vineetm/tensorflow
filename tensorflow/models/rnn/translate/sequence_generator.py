@@ -1,5 +1,5 @@
 from commons import CONFIG_FILE, STOPW_FILE, EVAL_DATA
-import os, logging, codecs
+import os, logging, codecs, time
 import tensorflow as tf
 import cPickle as pkl
 from seq2seq_model import Seq2SeqModel
@@ -9,6 +9,7 @@ from nltk.tokenize import word_tokenize as tokenizer
 from commons import execute_bleu_command
 import numpy as np, argparse
 from progress.bar import Bar
+from symbol_assigner import SymbolAssigner
 
 logging = tf.logging
 logging.set_verbosity(logging.INFO)
@@ -72,43 +73,9 @@ class SequenceGenerator(object):
     self.en_vocab, self.rev_en_vocab = initialize_vocabulary(en_vocab_path)
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
-    self.stopw = set()
-    with codecs.open(os.path.join(self.data_path,  STOPW_FILE)) as f:
-      for line in f:
-        self.stopw.add(line.strip())
+    stopw_file = os.path.join(self.data_path,  STOPW_FILE)
+    self.sa = SymbolAssigner(stopw_file)
 
-    logging.info('#Stopwords: %d'%len(self.stopw))
-
-
-  def replace_tokens(self, tokens, unk_map):
-    replaced_tokens = [unk_map[token] if token in unk_map else token for token in tokens]
-    return ' '.join(replaced_tokens)
-
-
-  def get_unk_map(self, tokens, unk_map=None):
-    if unk_map is None:
-      unk_map = OrderedDict()
-    for token in tokens:
-      if token in self.stopw:
-        continue
-      if token in unk_map:
-        continue
-      unk_map[token] = '%s%d' % ('UNK', len(unk_map) + 1)
-
-    rev_unk_map = {}
-    for token in unk_map:
-      rev_unk_map[unk_map[token]] = token
-
-    return unk_map, rev_unk_map
-
-
-  def convert_to_unk_sequence(self, sentence):
-    sentence = sentence.lower()
-    tokens = tokenizer(sentence)
-    unk_map, rev_unk_map = self.get_unk_map(tokens)
-    unk_sentence = self.replace_tokens(tokens, unk_map)
-
-    return unk_sentence, unk_map, rev_unk_map
 
 
   def generate_output_sequence(self, sentence, unk_tx=True):
@@ -208,44 +175,40 @@ class SequenceGenerator(object):
       new_work.append((' '.join(new_tokens), part[1] * curr_prob))
     return new_work[:self.beam_size]
 
-
-  def generate_topk_sequences(self, sentence, unk_tx=True):
-    if self.beam_size == 1:
-      return self.generate_output_sequence(sentence)
-
-    if unk_tx:
-      unk_sentence, unk_map, rev_unk_map = self.convert_to_unk_sequence(sentence)
-    else:
-      unk_sentence = sentence
-
-    token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
-    sentence_lc = ' '.join(tokenizer(sentence.lower()))
-    # logging.info('Input: %s'%sentence_lc)
-    #
-    # if unk_tx:
-    #   logging.info('UNK  :%s'%unk_sentence)
-
+  def get_bucket_id(self, token_ids):
     bucket_ids = [b for b in xrange(len(self._buckets))
-                      if self._buckets[b][0] > len(token_ids)]
-
+                  if self._buckets[b][0] > len(token_ids)]
     if len(bucket_ids) == 0:
       bucket_id = len(self._buckets) - 1
     else:
       bucket_id = min(bucket_ids)
+    return bucket_id
+
+
+  def generate_topk_sequences(self, sentence, unk_tx=True):
+    unk_map = None
+    if unk_tx:
+      unk_map = self.sa.build_unk_map(sentence)
+      unk_sentence = self.sa.assign_unk_symbols(sentence, unk_map)
+    else:
+      unk_sentence = sentence
+
+    token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
+    bucket_id = self.get_bucket_id(token_ids)
 
     encoder_inputs, decoder_inputs, target_weights = self.model.get_batch(
             {bucket_id: [(token_ids, [])]}, bucket_id)
 
     #Initialize with empty fixed tokens
     rem_work = self.get_new_work(encoder_inputs, decoder_inputs, target_weights, bucket_id, [], 1.0)
-    # logging.info(rem_work)
+
     final_translations = []
     while True:
       if len(rem_work) == 0:
         if unk_tx:
-          final_translations = [(self.replace_tokens(final_translation[0].split(), rev_unk_map), final_translation[1]) for final_translation in final_translations]
+          final_translations = [(self.sa.recover_orginal_sentence(final_translation[0], unk_map), final_translation[1]) for final_translation in final_translations]
         final_translations = sorted(final_translations, key=lambda x: x[1], reverse=True)[:self.beam_size]
-        return self.cleanup_final_translations(final_translations, sentence_lc)
+        return self.cleanup_final_translations(final_translations, sentence)
 
       #Remove top of work
       curr_work = rem_work[0]
@@ -296,7 +259,8 @@ class SequenceGenerator(object):
 
     return best_bleu, best_index
 
-  def get_corpus_bleu_score(self, max_refs, k, unk_tx):
+  def get_corpus_bleu_score(self, max_refs, k, unk_tx, progress=False):
+    start_time = time.time()
     ref_file_names = [os.path.join(self.eval_dir, 'all_ref%d.txt'%index) for index in range(max_refs)]
     ref_fw = [codecs.open(file_name, 'w', 'utf-8') for file_name in ref_file_names]
 
@@ -304,28 +268,27 @@ class SequenceGenerator(object):
     hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
 
     inp_fw = codecs.open(os.path.join(self.eval_dir, 'all_inputs.txt'), 'w', 'utf-8')
-    skipped_noq = 0
     skipped_noref = 0
     ref_str = ' '.join(ref_file_names)
 
-    bar = Bar('computing bleu', max=5000)
+    line_num = 0
+    if progress:
+      bar = Bar('computing bleu', max=50)
     for line in codecs.open(self.eval_file, 'r', 'utf-8'):
       parts = line.split('\t')
 
-      bar.next()
-      #Skip if first part is not a question
-      if parts[0][:2] != 'q:':
-        skipped_noq += 1
-        continue
+      if progress:
+        bar.next()
+      else:
+        line_num += 1
+        # if line_num % 50 == 0:
+        #   logging.info('Done :%d'%line_num)
 
-      input_sentence = ' '.join(tokenizer(parts[0][2:]))
+      input_sentence = parts[0]
 
-      references = [part[2:] for part in parts[1:] if part[:2] == 'q:'][:max_refs]
-
+      references = [part for part in parts[1:]][:max_refs]
       rem_ref = max_refs - len(references)
       references.extend(['' for _ in range(rem_ref)])
-      # logging.info('Ref: %s'%references)
-      references = [' '.join(tokenizer(reference)) for reference in references]
 
       #Skip if no references are found!
       if len(references) == 0:
@@ -344,8 +307,8 @@ class SequenceGenerator(object):
     hyp_fw.close()
     [fw.close() for fw in ref_fw]
     final_bleu = execute_bleu_command(ref_str, hyp_file)
-    logging.info('Final BLEU: %.2f'%final_bleu)
-    logging.info('Skipped: No_q:%d No_ref:%d'%(skipped_noq, skipped_noref))
+    logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, time.time() - start_time))
+
 
 
 def setup_args():
@@ -357,6 +320,7 @@ def setup_args():
   parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
   parser.add_argument('-k', dest='k', default=16, type=int, help='Maximum references')
   parser.add_argument('-no_unk_tx', dest='no_unk_tx', default=False, action='store_true')
+  parser.add_argument('-progress', dest='progress', default=False, action='store_true')
 
   args = parser.parse_args()
   return args
@@ -366,9 +330,7 @@ def main():
   args = setup_args()
   logging.info(args)
   sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, beam_size=args.beam_size, eval_dir=args.eval_dir)
-  # logging.info(sg.get_best_bleu_score(['how can my laptop be fixed ?'], ['how can my fix my laptop ?', 'how can my laptop ?']))
-  sg.get_corpus_bleu_score(args.max_refs, args.k, not args.no_unk_tx)
-  # sg.save_results(args.results)
+  sg.get_corpus_bleu_score(args.max_refs, args.k, not args.no_unk_tx, args.progress)
 
 
 if __name__ == '__main__':
