@@ -185,7 +185,9 @@ class SequenceGenerator(object):
     return bucket_id
 
 
-  def generate_topk_sequences(self, sentence, unk_tx=True):
+  def generate_topk_sequences(self, sentence, unk_tx=True, tokenize=True):
+    if tokenize:
+      sentence = ' '.join(tokenizer(sentence))
     unk_map = None
     if unk_tx:
       unk_map = self.sa.build_unk_map(sentence)
@@ -310,18 +312,30 @@ class SequenceGenerator(object):
     logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, time.time() - start_time))
 
 
+  def generate_variations(self, qs_file, min_prob=0.001):
+    var_fw = codecs.open('%s.variations'%qs_file, 'w', 'utf-8')
+
+    index = 0
+    for qs in codecs.open(qs_file, 'r', 'utf-8'):
+      logging.info('Processing qs[%d]: %s' % (index, qs))
+      variations = self.generate_topk_sequences(qs.lower())
+      variations = [variation[0] for variation in variations if variation[1] >= min_prob]
+      var_fw.write(';'.join(variations) + '\n')
+      index += 1
+
 
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('model_dir', help='Trained Model Directory')
-  parser.add_argument('eval_dir', help='Eval results directory')
+  parser.add_argument('-eval_dir', help='Eval results directory', default='eval')
   parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='/Users/vineet/repos/research/data/wikianswers/eval.data')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
   parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
   parser.add_argument('-k', dest='k', default=16, type=int, help='Maximum references')
   parser.add_argument('-no_unk_tx', dest='no_unk_tx', default=False, action='store_true')
   parser.add_argument('-progress', dest='progress', default=False, action='store_true')
-
+  parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
+  parser.add_argument('-qs_file', dest='qs_file', default=None)
   args = parser.parse_args()
   return args
 
@@ -329,8 +343,13 @@ def setup_args():
 def main():
   args = setup_args()
   logging.info(args)
-  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, beam_size=args.beam_size, eval_dir=args.eval_dir)
-  sg.get_corpus_bleu_score(args.max_refs, args.k, not args.no_unk_tx, args.progress)
+  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, beam_size=args.beam_size,
+                         eval_dir=args.eval_dir)
+  if args.bleu:
+    sg.get_corpus_bleu_score(args.max_refs, args.k, not args.no_unk_tx, args.progress)
+  else:
+    sg.generate_variations(args.qs_file)
+
 
 
 if __name__ == '__main__':
