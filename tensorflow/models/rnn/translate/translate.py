@@ -291,13 +291,13 @@ def train():
           print("  eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
           iter_ppx += eval_ppx
 
-          tf.logging.info('Train Samples')
-          print_samples(sess, model, train_set, rev_en_vocab, rev_fr_vocab, bucket_id)
-          tf.logging.info('')
+          # tf.logging.info('Train Samples')
+          # print_samples(sess, model, train_set, rev_en_vocab, rev_fr_vocab, bucket_id)
+          # tf.logging.info('')
 
-          tf.logging.info('Dev Samples')
-          print_samples(sess, model, dev_set, rev_en_vocab, rev_fr_vocab, bucket_id)
-          tf.logging.info('')
+          # tf.logging.info('Dev Samples')
+          # print_samples(sess, model, dev_set, rev_en_vocab, rev_fr_vocab, bucket_id)
+          # tf.logging.info('')
 
         sys.stdout.flush()
 

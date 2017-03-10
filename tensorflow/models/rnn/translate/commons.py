@@ -217,6 +217,14 @@ def get_diff_map(parts, stopw, numbers=False):
     unk_map = get_diff_unk_map(stopw, tokens, unk_map, unk_symbols[part_index], numbers)
   return unk_map
 
+#Count number of lines in a file
+def get_num_lines(file_name):
+  command = 'wc -l < %s'%file_name
+  logging.info('Executing cmd: %s'%command)
+  status, output = commands.getstatusoutput(command)
+  if status:
+    print(output)
+  return int(output)
 
 def generate_replacements(tokens, indexes, unused_symbols):
   replacement_candidates = []
