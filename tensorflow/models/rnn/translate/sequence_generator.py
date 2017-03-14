@@ -49,7 +49,8 @@ class SequenceGenerator(object):
       learning_rate=config['learning_rate'],
       learning_rate_decay_factor=config['learning_rate_decay_factor'],
       forward_only=True,
-      compute_prob=compute_prob)
+      compute_prob=compute_prob,
+      num_samples=-1)
 
     #Restore Model from checkpoint file
     ckpt = tf.train.get_checkpoint_state(self.model_path)
