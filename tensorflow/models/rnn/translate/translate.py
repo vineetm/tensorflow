@@ -314,7 +314,7 @@ def train():
 
         else:
           num_dev_unchanged += 1
-          if num_dev_unchanged >= 500:
+          if num_dev_unchanged >= 100:
             tf.logging.info('Early EXIT, dev unchanged:%d'%num_dev_unchanged)
             return
 
