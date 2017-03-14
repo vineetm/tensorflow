@@ -46,6 +46,8 @@ import tensorflow as tf
 
 import cPickle as pkl
 tf.logging.set_verbosity(tf.logging.INFO)
+logging = tf.logging
+
 from seq2seq_model import Seq2SeqModel
 from data_utils import prepare_nsu_data, EOS_ID, initialize_vocabulary, sentence_to_token_ids, PAD_ID
 from commons import CONFIG_FILE
@@ -211,11 +213,11 @@ def train():
   # with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
   with tf.Session() as sess:
     # Create model.
-    print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
+    logging.info("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, False)
 
     # Read data into buckets and compute their sizes.
-    print ("Reading development and training data (limit: %d)."
+    logging.info("Reading development and training data (limit: %d)."
            % FLAGS.max_train_data_size)
     dev_set = read_data(en_dev, fr_dev)
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
@@ -305,7 +307,7 @@ def train():
         # Save checkpoint and zero timer and loss.
         # Save model only when results improve
         if iter_ppx < best_ppx :
-          tf.logging.info('Old: %.2f New: %.2f'%(best_ppx, iter_ppx))
+          tf.logging.info('Step: %d Old: %.2f New: %.2f'%(current_step, best_ppx, iter_ppx))
           best_ppx = iter_ppx
           num_dev_unchanged = 0
           checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
