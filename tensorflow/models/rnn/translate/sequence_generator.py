@@ -182,6 +182,7 @@ class SequenceGenerator(object):
 
   def generate_topk_sequences(self, sentence, unk_tx=True, tokenize=True, beam_size=16):
     if tokenize:
+      sentence = sentence.lower()
       sentence = ' '.join(tokenizer(sentence))
     unk_map = None
     if unk_tx:
@@ -253,7 +254,7 @@ class SequenceGenerator(object):
     return bleu_scores
 
 
-  def get_corpus_bleu_score(self, max_refs, k, unk_tx, beam_size, progress=False, generate_report=True):
+  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True):
     fw_report = codecs.open(os.path.join(self.model_path, 'report.txt'), 'w', 'utf-8')
 
     start_time = time.time()
@@ -296,12 +297,16 @@ class SequenceGenerator(object):
       write_data.append(input_sentence)
       inp_fw.write(input_sentence + '\n')
 
-      all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size)
-      list_hypothesis = [hyp[0] for hyp in all_hypothesis][:k]
+      all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size, tokenize=False)
+
+      list_hypothesis = [hyp[0] for hyp in all_hypothesis]
 
       bleu_scores = self.get_bleu_scores(list_hypothesis, references)
-      best_index = np.argmax(bleu_scores)
-      hyp_fw.write(list_hypothesis[best_index].strip() + '\n')
+      if len(bleu_scores) > 0:
+        best_index = np.argmax(bleu_scores)
+        hyp_fw.write(list_hypothesis[best_index].strip() + '\n')
+      else:
+        hyp_fw.write('\n')
 
       for index in range(len(list_hypothesis)):
         write_data.append(list_hypothesis[index].strip())
@@ -338,7 +343,6 @@ def setup_args():
   parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='eval.data')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
   parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
-  parser.add_argument('-k', dest='k', default=16, type=int, help='Maximum references')
   parser.add_argument('-progress', dest='progress', default=False, action='store_true')
   parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
   parser.add_argument('-qs_file', dest='qs_file', default=None)
@@ -351,7 +355,7 @@ def main():
   logging.info(args)
   sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file)
   if args.bleu:
-    sg.get_corpus_bleu_score(max_refs=args.max_refs, k=args.k, beam_size=args.beam_size, unk_tx=True, progress=args.progress)
+    sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=True, progress=args.progress)
   else:
     sg.generate_variations(args.qs_file)
 
