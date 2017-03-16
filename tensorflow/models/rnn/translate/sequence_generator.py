@@ -14,8 +14,10 @@ from symbol_assigner import SymbolAssigner
 logging = tf.logging
 logging.set_verbosity(logging.INFO)
 
+DEF_MODEL_DIR = 'trained-models/model'
+
 class SequenceGenerator(object):
-  def __init__(self, model_dir, eval_file=None):
+  def __init__(self, model_dir=DEF_MODEL_DIR, eval_file=None):
 
     config_file_path = os.path.join(model_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
@@ -331,7 +333,7 @@ class SequenceGenerator(object):
     index = 0
     for qs in codecs.open(qs_file, 'r', 'utf-8'):
       logging.info('Processing qs[%d]: %s' % (index, qs))
-      variations = self.generate_topk_sequences(qs.lower())
+      variations = self.generate_topk_sequences(qs.lower(), tokenize=True, unk_tx=True)
       variations = [variation[0] for variation in variations if variation[1] >= min_prob]
       var_fw.write(';'.join(variations) + '\n')
       index += 1
@@ -339,7 +341,7 @@ class SequenceGenerator(object):
 
 def setup_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument('model_dir', help='Trained Model Directory')
+  parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
   parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='eval.data')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
   parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
