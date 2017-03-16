@@ -329,14 +329,16 @@ class SequenceGenerator(object):
 
   def generate_variations(self, qs_file, min_prob=0.001):
     var_fw = codecs.open('%s.variations'%qs_file, 'w', 'utf-8')
-
-    index = 0
+    N = get_num_lines(qs_file)
+    bar = Bar('Generating variations', max=N)
     for qs in codecs.open(qs_file, 'r', 'utf-8'):
-      logging.info('Processing qs[%d]: %s' % (index, qs))
+
       variations = self.generate_topk_sequences(qs.lower(), tokenize=True, unk_tx=True)
       variations = [variation[0] for variation in variations if variation[1] >= min_prob]
       var_fw.write(';'.join(variations) + '\n')
-      index += 1
+
+      bar.next()
+    var_fw.close()
 
 
 def setup_args():
