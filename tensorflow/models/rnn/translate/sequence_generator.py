@@ -11,6 +11,8 @@ import numpy as np, argparse
 from progress.bar import Bar
 from symbol_assigner import SymbolAssigner
 
+ENTITIES = ['PER', 'GEO', 'ORG', 'BLD']
+
 logging = tf.logging
 logging.set_verbosity(logging.INFO)
 
@@ -73,7 +75,7 @@ class SequenceGenerator(object):
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
     stopw_file = os.path.join(self.data_path,  STOPW_FILE)
-    self.sa = SymbolAssigner(stopw_file)
+    self.sa = SymbolAssigner(stopw_file, entity_mapping_file='entity-map.pkl', valid_entity_list=ENTITIES)
 
   def generate_output_sequence(self, sentence, unk_tx=True):
     sentence = sentence.lower()
@@ -182,12 +184,19 @@ class SequenceGenerator(object):
     return bucket_id
 
 
-  def generate_topk_sequences(self, sentence, unk_tx=True, tokenize=True, beam_size=16):
+  def generate_topk_sequences(self, sentence, unk_tx=True, tokenize=True, beam_size=16, phrase=False, entity=False):
     if tokenize:
       sentence = sentence.lower()
       sentence = ' '.join(tokenizer(sentence))
+
+    if phrase:
+      sentence = self.sa.convert_to_phrases(sentence)
+
     unk_map = None
-    if unk_tx:
+    if entity:
+      unk_map, unk_list = self.sa.build_entity_unk_map(sentence)
+      unk_sentence = self.sa.assign_unk_symbols(sentence, unk_map)
+    elif unk_tx:
       unk_map = self.sa.build_unk_map(sentence)
       unk_sentence = self.sa.assign_unk_symbols(sentence, unk_map)
     else:
@@ -205,7 +214,7 @@ class SequenceGenerator(object):
     final_translations = []
     while True:
       if len(rem_work) == 0:
-        if unk_tx:
+        if unk_tx or entity:
           final_translations = [(self.sa.recover_orginal_sentence(final_translation[0], unk_map), final_translation[1]) for final_translation in final_translations]
         final_translations = sorted(final_translations, key=lambda x: x[1], reverse=True)[:beam_size]
         return self.cleanup_final_translations(final_translations, sentence)
@@ -256,7 +265,7 @@ class SequenceGenerator(object):
     return bleu_scores
 
 
-  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True):
+  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True, entity=False, phrase=False):
     fw_report = codecs.open(os.path.join(self.model_path, 'report.txt'), 'w', 'utf-8')
 
     start_time = time.time()
@@ -299,9 +308,10 @@ class SequenceGenerator(object):
       write_data.append(input_sentence)
       inp_fw.write(input_sentence + '\n')
 
-      all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size, tokenize=False)
+      all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size, tokenize=False, entity=entity, phrase=phrase)
 
       list_hypothesis = [hyp[0] for hyp in all_hypothesis]
+      list_hypothesis = [self.sa.replace_phrase(hyp) for hyp in list_hypothesis]
 
       bleu_scores = self.get_bleu_scores(list_hypothesis, references)
       if len(bleu_scores) > 0:
@@ -349,6 +359,8 @@ def setup_args():
   parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
   parser.add_argument('-progress', dest='progress', default=False, action='store_true')
   parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
+  parser.add_argument('-phrase', dest='phrase', default=False, action='store_true')
+  parser.add_argument('-entity', dest='entity', default=False, action='store_true')
   parser.add_argument('-qs_file', dest='qs_file', default=None)
   args = parser.parse_args()
   return args
@@ -359,7 +371,11 @@ def main():
   logging.info(args)
   sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file)
   if args.bleu:
-    sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=True, progress=args.progress)
+    if args.entity:
+      sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=False, progress=args.progress, entity=args.entity, phrase=args.phrase)
+    else:
+      sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=True, progress=args.progress,
+                               entity=False, phrase=args.phrase)
   else:
     sg.generate_variations(args.qs_file)
 
