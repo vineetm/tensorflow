@@ -1,10 +1,10 @@
 from commons import CONFIG_FILE, STOPW_FILE, EVAL_DATA
-import os, logging, codecs, time
+import os, logging, codecs, time, nltk
 import tensorflow as tf
 import cPickle as pkl
 from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids, EOS_ID
-from collections import OrderedDict
+
 from nltk.tokenize import word_tokenize as tokenizer
 from commons import execute_bleu_command, get_num_lines
 import numpy as np, argparse
@@ -265,33 +265,74 @@ class SequenceGenerator(object):
     return bleu_scores
 
 
-  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True, entity=False, phrase=False):
-    fw_report = codecs.open(os.path.join(self.model_path, 'report.txt'), 'w', 'utf-8')
+  def get_nltk_bleu_scores(self, list_hypothesis, references):
+    bleu_scores = []
 
-    start_time = time.time()
-    ref_file_names = [os.path.join(self.model_path, 'all_ref%d.txt'%index) for index in range(max_refs)]
+    references_list = [reference.split() for reference in references]
+    for hyp in list_hypothesis:
+      bleu = nltk.translate.bleu_score.sentence_bleu(references_list, hyp.split())
+      bleu_scores.append(bleu)
+    return bleu_scores
+
+
+  def write_bleu_data(self, max_refs, input_sentences, selected_hypothesis, all_references, report_data):
+    #Write all references
+    ref_file_names = [os.path.join(self.model_path, 'all_ref%d.txt' % index) for index in range(max_refs)]
     ref_fw = [codecs.open(file_name, 'w', 'utf-8') for file_name in ref_file_names]
 
+    for references in all_references:
+      for index, reference in enumerate(references):
+        ref_fw[index].write(reference.strip() + '\n')
+    [fw.close() for fw in ref_fw]
+
+    #Write hypothesis
     hyp_file = os.path.join(self.model_path, 'all_hyp.txt')
     hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
+    for hyp in selected_hypothesis:
+      hyp_fw.write(hyp)
+    hyp_fw.close()
 
     inp_fw = codecs.open(os.path.join(self.model_path, 'all_inputs.txt'), 'w', 'utf-8')
-    skipped_noref = 0
-    ref_str = ' '.join(ref_file_names)
+    for input_sentence in input_sentences:
+      inp_fw.write(input_sentence + '\n')
+    inp_fw.close()
 
-    line_num = 0
+    fw_report = codecs.open(os.path.join(self.model_path, 'report.txt'), 'w', 'utf-8')
+    for write_data in report_data:
+      fw_report.write('\t'.join(write_data) + '\n')
+    fw_report.close()
+
+    ref_str = ' '.join(ref_file_names)
+    final_bleu = execute_bleu_command(ref_str, hyp_file)
+    return final_bleu
+
+
+  def read_lines(self, file_name):
+    fr = codecs.open(file_name, 'r', 'utf-8')
+    lines = fr.readlines()
+    fr.close()
+    return lines
+
+
+  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True, entity=False, phrase=False):
+    eval_lines = self.read_lines(self.eval_file)
+
+    start_time = time.time()
     if progress:
       N = get_num_lines(self.eval_file)
       bar = Bar('computing bleu', max=N)
 
-    for line in codecs.open(self.eval_file, 'r', 'utf-8'):
+    report_data = []
+    input_sentences = []
+    selected_hypothesis = []
+    all_references = []
+
+    for index, line in enumerate(eval_lines):
       write_data=[]
       parts = line.split('\t')
 
       if progress:
         bar.next()
-      else:
-        line_num += 1
 
       input_sentence = parts[0]
 
@@ -299,42 +340,32 @@ class SequenceGenerator(object):
       rem_ref = max_refs - len(references)
       references.extend(['' for _ in range(rem_ref)])
 
-      #Skip if no references are found!
-      if len(references) == 0:
-        skipped_noref += 1
-        continue
-
       input_sentence = input_sentence.strip()
-      write_data.append(input_sentence)
-      inp_fw.write(input_sentence + '\n')
+      input_sentences.append(input_sentence)
 
+      write_data.append(input_sentence)
       all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size, tokenize=False, entity=entity, phrase=phrase)
 
       list_hypothesis = [hyp[0] for hyp in all_hypothesis]
       list_hypothesis = [self.sa.replace_phrase(hyp) for hyp in list_hypothesis]
 
-      bleu_scores = self.get_bleu_scores(list_hypothesis, references)
+      # bleu_scores = self.get_bleu_scores(list_hypothesis, references)
+      bleu_scores = self.get_nltk_bleu_scores(list_hypothesis, references)
       if len(bleu_scores) > 0:
         best_index = np.argmax(bleu_scores)
-        hyp_fw.write(list_hypothesis[best_index].strip() + '\n')
+        selected_hypothesis.append(list_hypothesis[best_index].strip() + '\n')
       else:
-        hyp_fw.write('\n')
+        selected_hypothesis.append('\n')
 
       for index in range(len(list_hypothesis)):
         write_data.append(list_hypothesis[index].strip())
         write_data.append(str(bleu_scores[index]))
 
-      for index, reference in enumerate(references):
-        ref_fw[index].write(reference.strip() + '\n')
-
-      if generate_report:
-        fw_report.write('\t'.join(write_data) + '\n')
-
-    hyp_fw.close()
-    fw_report.close()
-    [fw.close() for fw in ref_fw]
-    final_bleu = execute_bleu_command(ref_str, hyp_file)
-    logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, time.time() - start_time))
+      all_references.append(references)
+      report_data.append(write_data)
+    end_time = time.time()
+    final_bleu = self.write_bleu_data(max_refs, input_sentences, selected_hypothesis, all_references, report_data)
+    logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, end_time - start_time))
 
 
   def generate_variations(self, qs_file, min_prob=0.001):
