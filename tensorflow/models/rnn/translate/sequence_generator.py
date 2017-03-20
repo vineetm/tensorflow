@@ -349,8 +349,8 @@ class SequenceGenerator(object):
       list_hypothesis = [hyp[0] for hyp in all_hypothesis]
       list_hypothesis = [self.sa.replace_phrase(hyp) for hyp in list_hypothesis]
 
-      # bleu_scores = self.get_bleu_scores(list_hypothesis, references)
-      bleu_scores = self.get_nltk_bleu_scores(list_hypothesis, references)
+      bleu_scores = self.get_bleu_scores(list_hypothesis, references)
+      # bleu_scores = self.get_nltk_bleu_scores(list_hypothesis, references)
       if len(bleu_scores) > 0:
         best_index = np.argmax(bleu_scores)
         selected_hypothesis.append(list_hypothesis[best_index].strip() + '\n')
