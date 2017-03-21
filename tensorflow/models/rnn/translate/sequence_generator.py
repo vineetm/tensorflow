@@ -386,6 +386,23 @@ class SequenceGenerator(object):
       bar.next()
     var_fw.close()
 
+  def generate_qs_para(self, beam_size, qs_file):
+    qs_para = {}
+    questions = pkl.load(open(qs_file))
+    questions = [' '.join(question) for question in questions]
+    set_questions = set(questions)
+    logging.info('Orig questions: %d Set_questions: %d'%(len(questions), len(set_questions)))
+
+    bar = Bar('generating paraphrases', max = len(set_questions))
+    for question in set_questions:
+      variations = self.generate_topk_sequences(question, unk_tx=True,
+                                                tokenize=True, beam_size=beam_size, phrase=False, entity=False)
+      bar.next()
+      if len(variations) == 0:
+        continue
+      qs_para[question] = variations[0][0]
+    pkl.dump(qs_para, open('qs.para.pkl', 'w'))
+
 
 def setup_args():
   parser = argparse.ArgumentParser()
@@ -399,6 +416,7 @@ def setup_args():
   parser.add_argument('-entity', dest='entity', default=False, action='store_true')
   parser.add_argument('-qs_file', dest='qs_file', default=None)
   parser.add_argument('-max_unk_symbols', default=8, type=int)
+  parser.add_argument('-qs_para', dest='qs_para', default=False, action='store_true')
   args = parser.parse_args()
   return args
 
@@ -414,6 +432,8 @@ def main():
     else:
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=True, progress=args.progress,
                                entity=False, phrase=args.phrase)
+  elif args.qs_para:
+    sg.generate_qs_para(beam_size=1, qs_file = args.qs_file)
   else:
     sg.generate_variations(args.qs_file)
 
