@@ -19,7 +19,7 @@ logging.set_verbosity(logging.INFO)
 DEF_MODEL_DIR = 'trained-models/model'
 
 class SequenceGenerator(object):
-  def __init__(self, model_dir=DEF_MODEL_DIR, eval_file=None):
+  def __init__(self, model_dir=DEF_MODEL_DIR, eval_file=None, max_unk_symbols=8):
 
     config_file_path = os.path.join(model_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
@@ -38,6 +38,7 @@ class SequenceGenerator(object):
     self.src_vocab_size = config['src_vocab_size']
     self.target_vocab_size = config['target_vocab_size']
     self._buckets = config['_buckets']
+    self.max_unk_symbols = max_unk_symbols
 
     compute_prob = True
 
@@ -201,6 +202,10 @@ class SequenceGenerator(object):
       unk_sentence = self.sa.assign_unk_symbols(sentence, unk_map)
     else:
       unk_sentence = sentence
+
+    if unk_map is not None and len(unk_map) > self.max_unk_symbols:
+      logging.warn('Skipping Unk_symbols:%d Max:%d'%(len(unk_map), self.max_unk_symbols))
+      return []
 
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
     bucket_id = self.get_bucket_id(token_ids)
@@ -393,6 +398,7 @@ def setup_args():
   parser.add_argument('-phrase', dest='phrase', default=False, action='store_true')
   parser.add_argument('-entity', dest='entity', default=False, action='store_true')
   parser.add_argument('-qs_file', dest='qs_file', default=None)
+  parser.add_argument('-max_unk_symbols', default=8, type=int)
   args = parser.parse_args()
   return args
 
@@ -400,10 +406,11 @@ def setup_args():
 def main():
   args = setup_args()
   logging.info(args)
-  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file)
+  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, max_unk_symbols=args.max_unk_symbols)
   if args.bleu:
     if args.entity:
-      sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=False, progress=args.progress, entity=args.entity, phrase=args.phrase)
+      sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=False, progress=args.progress,
+                               entity=args.entity, phrase=args.phrase)
     else:
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=True, progress=args.progress,
                                entity=False, phrase=args.phrase)
