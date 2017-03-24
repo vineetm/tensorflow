@@ -12,6 +12,7 @@ from progress.bar import Bar
 from symbol_assigner import SymbolAssigner
 
 ENTITIES = ['PER', 'GEO', 'ORG', 'BLD']
+TRANSLATIONS_FILE = 'translations.pkl'
 
 logging = tf.logging
 logging.set_verbosity(logging.INFO)
@@ -142,7 +143,7 @@ class SequenceGenerator(object):
     for index in range(len(output_token_ids)):
       decoder_inputs[index + 1] = np.array([output_token_ids[index]], dtype=np.float32)
 
-  def cleanup_final_translations(self, final_translations, source_sentence):
+  def cleanup_final_translations(self, final_translations, source_sentence, phrase):
     sentences_set = set()
     sentences_set.add(source_sentence)
 
@@ -154,6 +155,8 @@ class SequenceGenerator(object):
         cleaned_translations.append((sentence, prob))
         sentences_set.add(sentence)
 
+    if phrase:
+      cleaned_translations = [(self.sa.replace_phrase(sentence), prob) for sentence, prob in cleaned_translations]
     return cleaned_translations
 
 
@@ -222,7 +225,7 @@ class SequenceGenerator(object):
         if unk_tx or entity:
           final_translations = [(self.sa.recover_orginal_sentence(final_translation[0], unk_map), final_translation[1]) for final_translation in final_translations]
         final_translations = sorted(final_translations, key=lambda x: x[1], reverse=True)[:beam_size]
-        return self.cleanup_final_translations(final_translations, sentence)
+        return self.cleanup_final_translations(final_translations, sentence, phrase)
 
       #Remove top of work
       curr_work = rem_work[0]
@@ -322,6 +325,19 @@ class SequenceGenerator(object):
   def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True, entity=False, phrase=False):
     eval_lines = self.read_lines(self.eval_file)
 
+    #Load saved results, if present
+    translations_fname = os.path.join(self.model_path, TRANSLATIONS_FILE)
+    save_tx = False
+    if os.path.exists(translations_fname):
+      fr = open(translations_fname)
+      translations = pkl.load(fr)
+      fr.close()
+      assert len(translations) == len(eval_lines)
+      logging.info('Loaded %d pre-computed tx from %s'%(len(translations), translations_fname))
+    else:
+      save_tx = True
+      translations = {}
+
     start_time = time.time()
     if progress:
       N = get_num_lines(self.eval_file)
@@ -349,10 +365,15 @@ class SequenceGenerator(object):
       input_sentences.append(input_sentence)
 
       write_data.append(input_sentence)
-      all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size, tokenize=False, entity=entity, phrase=phrase)
+      if index in translations:
+        all_hypothesis = translations[index][:beam_size]
+      else:
+        all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size,
+                                                      tokenize=False, entity=entity, phrase=phrase)
+        translations[index] = all_hypothesis
 
       list_hypothesis = [hyp[0] for hyp in all_hypothesis]
-      list_hypothesis = [self.sa.replace_phrase(hyp) for hyp in list_hypothesis]
+      # list_hypothesis = [self.sa.replace_phrase(hyp) for hyp in list_hypothesis]
 
       bleu_scores = self.get_bleu_scores(list_hypothesis, references)
       # bleu_scores = self.get_nltk_bleu_scores(list_hypothesis, references)
@@ -370,6 +391,9 @@ class SequenceGenerator(object):
       report_data.append(write_data)
     end_time = time.time()
     final_bleu = self.write_bleu_data(max_refs, input_sentences, selected_hypothesis, all_references, report_data)
+    logging.info('Saving tx to %s'%translations_fname)
+    with open(translations_fname, 'w') as ftr:
+      pkl.dump(translations, ftr)
     logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, end_time - start_time))
 
 
@@ -386,7 +410,7 @@ class SequenceGenerator(object):
       bar.next()
     var_fw.close()
 
-  def generate_qs_para(self, beam_size, qs_file):
+  def generate_qs_para(self, beam_size, qs_file, phrase, entity, min_prob=0.001):
     qs_para = {}
     questions = pkl.load(open(qs_file))
     questions = [' '.join(question) for question in questions]
@@ -395,12 +419,23 @@ class SequenceGenerator(object):
 
     bar = Bar('generating paraphrases', max = len(set_questions))
     for question in set_questions:
-      variations = self.generate_topk_sequences(question, unk_tx=True,
-                                                tokenize=True, beam_size=beam_size, phrase=False, entity=False)
+      if entity:
+        variations = self.generate_topk_sequences(question, unk_tx=False,
+                                                tokenize=True, beam_size=beam_size, phrase=phrase, entity=entity)
+      else:
+        variations = self.generate_topk_sequences(question, unk_tx=True,
+                                                  tokenize=True, beam_size=beam_size, phrase=False, entity=False)
+
       bar.next()
       if len(variations) == 0:
         continue
-      qs_para[question] = variations[0][0]
+      else:
+        qs_para[question] = []
+        for variation in variations:
+          if variation[1] > min_prob:
+            qs_para[question].append(variation[0])
+        logging.info('Num vars: %d'%len(qs_para[question]))
+
     pkl.dump(qs_para, open('qs.para.pkl', 'w'))
 
 
@@ -417,6 +452,7 @@ def setup_args():
   parser.add_argument('-qs_file', dest='qs_file', default=None)
   parser.add_argument('-max_unk_symbols', default=8, type=int)
   parser.add_argument('-qs_para', dest='qs_para', default=False, action='store_true')
+  parser.add_argument('-min_prob', default=0.001, type=float)
   args = parser.parse_args()
   return args
 
@@ -433,7 +469,7 @@ def main():
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=True, progress=args.progress,
                                entity=False, phrase=args.phrase)
   elif args.qs_para:
-    sg.generate_qs_para(beam_size=1, qs_file = args.qs_file)
+    sg.generate_qs_para(beam_size=args.beam_size, qs_file=args.qs_file, phrase=args.phrase, entity=args.entity, min_prob=args.min_prob)
   else:
     sg.generate_variations(args.qs_file)
 
