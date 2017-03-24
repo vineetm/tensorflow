@@ -444,7 +444,7 @@ def setup_args():
   parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
   parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='eval.data')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
-  parser.add_argument('-max_refs', dest='max_refs', default=8, type=int, help='Maximum references')
+  parser.add_argument('-max_refs', dest='max_refs', default=10, type=int, help='Maximum references')
   parser.add_argument('-progress', dest='progress', default=False, action='store_true')
   parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
   parser.add_argument('-phrase', dest='phrase', default=False, action='store_true')
