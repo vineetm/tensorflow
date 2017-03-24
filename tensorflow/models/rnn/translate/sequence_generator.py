@@ -354,7 +354,8 @@ class SequenceGenerator(object):
 
       if progress:
         bar.next()
-
+      else:
+        logging.info('Done %d'%index)
       input_sentence = parts[0]
 
       references = [part for part in parts[1:]][:max_refs]
@@ -391,13 +392,15 @@ class SequenceGenerator(object):
       report_data.append(write_data)
     end_time = time.time()
     final_bleu = self.write_bleu_data(max_refs, input_sentences, selected_hypothesis, all_references, report_data)
-    logging.info('Saving tx to %s'%translations_fname)
-    with open(translations_fname, 'w') as ftr:
-      pkl.dump(translations, ftr)
-    logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, end_time - start_time))
+
+    if save_tx:
+      logging.info('Saving tx to %s' % translations_fname)
+      with open(translations_fname, 'w') as ftr:
+        pkl.dump(translations, ftr)
+      logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, end_time - start_time))
 
 
-  def generate_variations(self, qs_file, min_prob=0.001):
+  def generate_deepqa_variations(self, qs_file, min_prob=0.001):
     var_fw = codecs.open('%s.variations'%qs_file, 'w', 'utf-8')
     N = get_num_lines(qs_file)
     bar = Bar('Generating variations', max=N)
@@ -410,7 +413,7 @@ class SequenceGenerator(object):
       bar.next()
     var_fw.close()
 
-  def generate_qs_para(self, beam_size, qs_file, phrase, entity, min_prob=0.001):
+  def generate_deepqa_qs_para(self, beam_size, qs_file, phrase, entity, min_prob=0.001):
     qs_para = {}
     questions = pkl.load(open(qs_file))
     questions = [' '.join(question) for question in questions]
@@ -439,6 +442,24 @@ class SequenceGenerator(object):
     pkl.dump(qs_para, open('qs.para.pkl', 'w'))
 
 
+  def generate_paralex_variations(self, beam_size, qs_file, phrase, entity, min_prob):
+    questions = codecs.open(qs_file, 'r', 'utf-8').readlines()
+    bar = Bar('Generate paralex variations', max=len(questions))
+
+    for question in questions:
+      question = question.strip()
+      if entity:
+        variations = self.generate_topk_sequences(question, unk_tx=False,
+                                                tokenize=True, beam_size=beam_size, phrase=phrase, entity=entity)
+      else:
+        variations = self.generate_topk_sequences(question, unk_tx=True,
+                                                  tokenize=True, beam_size=beam_size, phrase=False, entity=False)
+      bar.next()
+
+
+
+
+
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
@@ -451,7 +472,9 @@ def setup_args():
   parser.add_argument('-entity', dest='entity', default=False, action='store_true')
   parser.add_argument('-qs_file', dest='qs_file', default=None)
   parser.add_argument('-max_unk_symbols', default=8, type=int)
-  parser.add_argument('-qs_para', dest='qs_para', default=False, action='store_true')
+  parser.add_argument('-deep_qa', dest='deep_qa', default=False, action='store_true')
+  parser.add_argument('-paralex', dest='paralex', default=False, action='store_true')
+  parser.add_argument('-unk_tx', dest='unk_tx', default=False, action='store_true')
   parser.add_argument('-min_prob', default=0.001, type=float)
   args = parser.parse_args()
   return args
@@ -466,12 +489,13 @@ def main():
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=False, progress=args.progress,
                                entity=args.entity, phrase=args.phrase)
     else:
-      sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=True, progress=args.progress,
+      sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=args.unk_tx, progress=args.progress,
                                entity=False, phrase=args.phrase)
-  elif args.qs_para:
-    sg.generate_qs_para(beam_size=args.beam_size, qs_file=args.qs_file, phrase=args.phrase, entity=args.entity, min_prob=args.min_prob)
-  else:
-    sg.generate_variations(args.qs_file)
+  elif args.deep_qa:
+    sg.generate_deepqa_qs_para(beam_size=args.beam_size, qs_file=args.qs_file, phrase=args.phrase, entity=args.entity, min_prob=args.min_prob)
+  elif args.paralex:
+    sg.generate_paralex_variations(beam_size=args.beam_size, qs_file=args.qs_file, phrase=args.phrase, entity=args.entity,
+                                   min_prob=args.min_prob)
 
 
 
