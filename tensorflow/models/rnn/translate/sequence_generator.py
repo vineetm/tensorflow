@@ -20,7 +20,7 @@ logging.set_verbosity(logging.INFO)
 DEF_MODEL_DIR = 'trained-models/model'
 
 class SequenceGenerator(object):
-  def __init__(self, model_dir=DEF_MODEL_DIR, eval_file=None, max_unk_symbols=8, entity=False):
+  def __init__(self, model_dir=DEF_MODEL_DIR, eval_file=None, max_unk_symbols=8, entity=False, phrase=False):
 
     config_file_path = os.path.join(model_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
@@ -77,7 +77,7 @@ class SequenceGenerator(object):
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
     stopw_file = os.path.join(self.data_path,  STOPW_FILE)
-    if entity:
+    if entity or phrase:
       self.sa = SymbolAssigner(stopw_file, entity_mapping_file='entity-map.pkl', valid_entity_list=ENTITIES)
     else:
       self.sa = SymbolAssigner(stopw_file, valid_entity_list=None, entity_mapping_file=None)
@@ -486,7 +486,8 @@ def setup_args():
 def main():
   args = setup_args()
   logging.info(args)
-  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, max_unk_symbols=args.max_unk_symbols, entity=args.entity)
+  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, max_unk_symbols=args.max_unk_symbols,
+                         entity=args.entity, phrase=args.phrase)
   if args.bleu:
     if args.entity:
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=False, progress=args.progress,
