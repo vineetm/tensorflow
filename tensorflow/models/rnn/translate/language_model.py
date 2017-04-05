@@ -56,7 +56,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from commons import LM_VOCAB_FILE
+from reader import EOS_WORD
 import tensorflow as tf, os, cPickle as pkl, numpy as np
 from nltk.tokenize import word_tokenize as tokenizer
 
@@ -65,6 +65,7 @@ logging.set_verbosity(tf.logging.INFO)
 
 def data_type():
   return tf.float32
+
 
 class LargeConfig(object):
   """Large config."""
@@ -81,6 +82,7 @@ class LargeConfig(object):
   batch_size = 1
   vocab_size = 10000
   max_len = 50
+
 
 class LanguageModel(object):
   """The PTB model."""
@@ -115,8 +117,8 @@ class LanguageModel(object):
       # initialized to 1 but the hyperparameters of the model would need to be
       # different than reported in the paper.
 
-      lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
-      cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
+      lstm_cell = tf.contrib.rnn.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
+      cell = tf.contrib.rnn.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
 
       self._initial_state = cell.zero_state(batch_size, data_type())
       embedding = tf.get_variable(
@@ -142,7 +144,7 @@ class LanguageModel(object):
           outputs.append(cell_output)
 
 
-      output = tf.reshape(tf.concat(1, outputs), [-1, size])
+      output = tf.reshape(tf.concat(outputs, 1), [-1, size])
       softmax_w = tf.get_variable(
           "softmax_w", [size, vocab_size], dtype=data_type())
       softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
@@ -174,10 +176,8 @@ class LanguageModel(object):
     # Lower case, tokenize, generate token #s
     sentence = sentence.lower()
     tokens = tokenizer(sentence)
-    token_ids = [self.word_to_id[token] if token in self.word_to_id
-                 else self.word_to_id['<unk>']
-                 for token in tokens]
-    token_ids.insert(0, self.word_to_id['<eos>'])
+    token_ids = [self.word_to_id[token] for token in tokens]
+    token_ids.insert(0, self.word_to_id[EOS_WORD])
 
     state = self.session.run(self.initial_state)
     total_prob = 0.0

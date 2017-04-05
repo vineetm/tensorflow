@@ -56,7 +56,7 @@ $ python ptb_word_lm.py --data_path=simple-examples/data/
 from __future__ import division
 from __future__ import print_function
 
-import time
+import time, os
 
 import numpy as np
 import tensorflow as tf
@@ -159,11 +159,12 @@ class PTBModel(object):
       return
 
     self._lr = tf.Variable(0.0, trainable=False)
+    self.global_step = tf.Variable(0, trainable=False)
     tvars = tf.trainable_variables()
     grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
                                     config.max_grad_norm)
     optimizer = tf.train.GradientDescentOptimizer(self._lr)
-    self._train_op = optimizer.apply_gradients(zip(grads, tvars))
+    self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
 
     self._new_lr = tf.placeholder(
       tf.float32, shape=[], name="new_learning_rate")
@@ -324,6 +325,7 @@ def main(_):
   eval_config.batch_size = 1
   eval_config.num_steps = 1
 
+  checkpoint_path = os.path.join(FLAGS.save_path, "lm.ckpt")
   with tf.Graph().as_default(), tf.Session() as session:
     initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)
@@ -351,7 +353,7 @@ def main(_):
       if valid_perplexity < best_valid_perplexity:
         logging.info('Epoch:%d Saving Model Valid:%.3f'%(i, valid_perplexity))
         best_valid_perplexity = valid_perplexity
-        saver.save(session, FLAGS.model_path)
+        saver.save(session, checkpoint_path, global_step=m.global_step)
 
       logging.info("Epoch: %d Valid Perplexity: %.3f" % (i + 1, valid_perplexity))
 
