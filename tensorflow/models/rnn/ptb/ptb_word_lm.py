@@ -325,7 +325,7 @@ def main(_):
   eval_config.batch_size = 1
   eval_config.num_steps = 1
 
-  checkpoint_path = os.path.join(FLAGS.save_path, "lm.ckpt")
+  checkpoint_path = os.path.join(FLAGS.model_path, "lm.ckpt")
   with tf.Graph().as_default(), tf.Session() as session:
     initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)

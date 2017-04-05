@@ -66,6 +66,21 @@ logging.set_verbosity(tf.logging.INFO)
 def data_type():
   return tf.float32
 
+class SmallConfig(object):
+  """Small config."""
+  init_scale = 0.1
+  learning_rate = 1.0
+  max_grad_norm = 5
+  num_layers = 2
+  num_steps = 1
+  hidden_size = 200
+  max_epoch = 4
+  max_max_epoch = 13
+  keep_prob = 1.0
+  lr_decay = 0.5
+  batch_size = 1
+  vocab_size = 10000
+
 
 class LargeConfig(object):
   """Large config."""
@@ -98,6 +113,8 @@ class LanguageModel(object):
     initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)
 
+    self.data_path = data_path
+    self.model_path = model_path
     vocab_file = os.path.join(data_path, 'vocab.pkl')
     self.word_to_id = pkl.load(open(vocab_file, 'rb'))
     self.generate_id_to_word()
@@ -155,7 +172,14 @@ class LanguageModel(object):
 
     self.session = tf.Session()
     saver = tf.train.Saver()
-    saver.restore(self.session, model_path)
+
+    ckpt = tf.train.get_checkpoint_state(self.model_path)
+    if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+      logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+      saver.restore(self.session, ckpt.model_checkpoint_path)
+    else:
+      logging.error('No Model found at %s'%self.model_path)
+      return
 
   @property
   def input_data(self):
@@ -176,6 +200,7 @@ class LanguageModel(object):
     # Lower case, tokenize, generate token #s
     sentence = sentence.lower()
     tokens = tokenizer(sentence)
+
     token_ids = [self.word_to_id[token] for token in tokens]
     token_ids.insert(0, self.word_to_id[EOS_WORD])
 
