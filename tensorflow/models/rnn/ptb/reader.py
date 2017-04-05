@@ -33,7 +33,7 @@ EOS_WORD = 'EOS'
 
 def _read_words(filename):
   with tf.gfile.GFile(filename, "r") as f:
-    return f.read().replace("\n", " <eos> ").split()
+    return f.read().replace("\n", " %s "%EOS_WORD).split()
 
 
 def _build_vocab(filename, max_vocab):
