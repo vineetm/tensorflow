@@ -74,7 +74,6 @@ flags.DEFINE_string("data_path", None, "data_path")
 flags.DEFINE_string("model_path", None, "model_path")
 flags.DEFINE_bool("use_fp16", False,
                   "Train using 16-bit floats instead of 32bit floats")
-flags.DEFINE_string("gpu_device", '/cpu:0', "gpu_device")
 FLAGS = flags.FLAGS
 
 
@@ -101,16 +100,13 @@ class PTBModel(object):
     # initialized to 1 but the hyperparameters of the model would need to be
     # different than reported in the paper.
 
-    gpu_device_name = '%s'%FLAGS.gpu_device
-    logging.info('GPU Device: %s'%gpu_device_name)
-    with tf.device(gpu_device_name):
-      lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
-      if is_training and config.keep_prob < 1:
-        lstm_cell = tf.nn.rnn_cell.DropoutWrapper(
-            lstm_cell, output_keep_prob=config.keep_prob)
-      cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
+    lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias=0.0, state_is_tuple=True)
+    if is_training and config.keep_prob < 1:
+      lstm_cell = tf.nn.rnn_cell.DropoutWrapper(
+          lstm_cell, output_keep_prob=config.keep_prob)
+    cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers, state_is_tuple=True)
 
-      self._initial_state = cell.zero_state(batch_size, data_type())
+    self._initial_state = cell.zero_state(batch_size, data_type())
 
     with tf.device("/cpu:0"):
       embedding = tf.get_variable(
@@ -132,18 +128,17 @@ class PTBModel(object):
     # outputs, state = rnn.rnn(cell, inputs, initial_state=self._initial_state)
     outputs = []
     state = self._initial_state
-    with tf.device(gpu_device_name), tf.variable_scope("RNN"):
+    with tf.variable_scope("RNN"):
       for time_step in range(num_steps):
         if time_step > 0: tf.get_variable_scope().reuse_variables()
         (cell_output, state) = cell(inputs[:, time_step, :], state)
         outputs.append(cell_output)
 
-    with tf.device(gpu_device_name):
-      output = tf.reshape(tf.concat(1, outputs), [-1, size])
-      softmax_w = tf.get_variable(
-        "softmax_w", [size, vocab_size], dtype=data_type())
-      softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
-      logits = tf.matmul(output, softmax_w) + softmax_b
+    output = tf.reshape(tf.concat(1, outputs), [-1, size])
+    softmax_w = tf.get_variable(
+      "softmax_w", [size, vocab_size], dtype=data_type())
+    softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
+    logits = tf.matmul(output, softmax_w) + softmax_b
 
     if is_decoder:
       self.probs = tf.nn.softmax(logits)
@@ -153,28 +148,26 @@ class PTBModel(object):
     if is_decoder:
       return
 
-    with tf.device(gpu_device_name):
-      loss = tf.nn.seq2seq.sequence_loss_by_example(
-        [logits],
-        [tf.reshape(self._targets, [-1])],
-        [tf.ones([batch_size * num_steps], dtype=data_type())])
-      self._cost = cost = tf.reduce_sum(loss) / batch_size
+    loss = tf.nn.seq2seq.sequence_loss_by_example(
+      [logits],
+      [tf.reshape(self._targets, [-1])],
+      [tf.ones([batch_size * num_steps], dtype=data_type())])
+    self._cost = cost = tf.reduce_sum(loss) / batch_size
 
 
     if not is_training:
       return
 
-    with tf.device(gpu_device_name):
-      self._lr = tf.Variable(0.0, trainable=False)
-      tvars = tf.trainable_variables()
-      grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
-                                      config.max_grad_norm)
-      optimizer = tf.train.GradientDescentOptimizer(self._lr)
-      self._train_op = optimizer.apply_gradients(zip(grads, tvars))
+    self._lr = tf.Variable(0.0, trainable=False)
+    tvars = tf.trainable_variables()
+    grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
+                                    config.max_grad_norm)
+    optimizer = tf.train.GradientDescentOptimizer(self._lr)
+    self._train_op = optimizer.apply_gradients(zip(grads, tvars))
 
-      self._new_lr = tf.placeholder(
-        tf.float32, shape=[], name="new_learning_rate")
-      self._lr_update = tf.assign(self._lr, self._new_lr)
+    self._new_lr = tf.placeholder(
+      tf.float32, shape=[], name="new_learning_rate")
+    self._lr_update = tf.assign(self._lr, self._new_lr)
 
   def assign_lr(self, session, lr_value):
     session.run(self._lr_update, feed_dict={self._new_lr: lr_value})
@@ -331,13 +324,7 @@ def main(_):
   eval_config.batch_size = 1
   eval_config.num_steps = 1
 
-  #Device Placemement options
-  cf = tf.ConfigProto()
-  cf.gpu_options.allocator_type = 'BFC'
-  cf.log_device_placement=True
-  cf.gpu_options.allow_growth = True
-
-  with tf.Graph().as_default(), tf.Session(config=cf) as session:
+  with tf.Graph().as_default(), tf.Session() as session:
     initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)
     with tf.variable_scope("model", reuse=None, initializer=initializer):
@@ -375,4 +362,3 @@ def main(_):
 
 if __name__ == "__main__":
   tf.app.run()
-

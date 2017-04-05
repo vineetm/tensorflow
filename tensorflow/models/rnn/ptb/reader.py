@@ -19,7 +19,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import collections
+from collections import Counter, defaultdict
 import os
 
 import cPickle as pkl
@@ -27,21 +27,31 @@ import numpy as np
 import tensorflow as tf
 
 logging = tf.logging
+UNK_WORD = 'UNK'
+EOS_WORD = 'EOS'
+
 
 def _read_words(filename):
   with tf.gfile.GFile(filename, "r") as f:
     return f.read().replace("\n", " <eos> ").split()
 
 
-def _build_vocab(filename):
+def _build_vocab(filename, max_vocab):
   data = _read_words(filename)
 
-  counter = collections.Counter(data)
-  count_pairs = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
+  counter = Counter(data)
+  # count_pairs = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
+  #
+  # words, _ = list(zip(*count_pairs))
+  # word_to_id = dict(zip(words, range(len(words))))
+  word_to_id = defaultdict(int)
+  word_to_id[EOS_WORD] = 1
 
-  words, _ = list(zip(*count_pairs))
-  word_to_id = dict(zip(words, range(len(words))))
+  for word, _ in counter.most_common(max_vocab-1):
+    if word == EOS_WORD:
+      continue
 
+    word_to_id[word] = len(word_to_id) + 1
   return word_to_id
 
 
@@ -73,7 +83,7 @@ def ptb_raw_data(data_path=None):
   valid_path = os.path.join(data_path, "ptb.valid.txt")
   test_path = os.path.join(data_path, "ptb.test.txt")
 
-  word_to_id = _build_vocab(train_path)
+  word_to_id = _build_vocab(train_path, max_vocab=10000)
   train_data = _file_to_word_ids(train_path, word_to_id)
   valid_data = _file_to_word_ids(valid_path, word_to_id)
   test_data = _file_to_word_ids(test_path, word_to_id)
