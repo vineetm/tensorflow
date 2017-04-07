@@ -17,7 +17,7 @@ TRANSLATIONS_FILE = 'translations.pkl'
 logging = tf.logging
 logging.set_verbosity(logging.INFO)
 
-DEF_MODEL_DIR = 'trained-models/model'
+DEF_MODEL_DIR = 'trained-models/seq2seq'
 
 class SequenceGenerator(object):
   def __init__(self, model_dir=DEF_MODEL_DIR, eval_file=None, max_unk_symbols=8, entity=False, phrase=False):
@@ -210,7 +210,7 @@ class SequenceGenerator(object):
       unk_sentence = sentence
 
     if unk_map is not None and len(unk_map) > self.max_unk_symbols:
-      logging.warn('Skipping Unk_symbols:%d Max:%d'%(len(unk_map), self.max_unk_symbols))
+      # logging.warn('Skipping Unk_symbols:%d Max:%d'%(len(unk_map), self.max_unk_symbols))
       return []
 
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
@@ -459,6 +459,17 @@ class SequenceGenerator(object):
                                                   tokenize=True, beam_size=beam_size, phrase=False, entity=False)
       bar.next()
 
+  def generate_variations(self, qs_file, min_prob=0.001):
+    var_fw = codecs.open('%s.variations' % qs_file, 'w', 'utf-8')
+    N = get_num_lines(qs_file)
+    bar = Bar('Generating variations', max=N)
+    for qs in codecs.open(qs_file, 'r', 'utf-8'):
+      variations = self.generate_topk_sequences(qs.lower(), tokenize=True, unk_tx=True)
+      variations = [variation[0] for variation in variations if variation[1] >= min_prob]
+      var_fw.write(';'.join(variations) + '\n')
+
+      bar.next()
+    var_fw.close()
 
 
 
@@ -488,6 +499,10 @@ def main():
   logging.info(args)
   sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, max_unk_symbols=args.max_unk_symbols,
                          entity=args.entity, phrase=args.phrase)
+
+  if args.qs_file:
+    sg.generate_variations(args.qs_file)
+
   if args.bleu:
     if args.entity:
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=False, progress=args.progress,
