@@ -57,6 +57,7 @@ from __future__ import division
 from __future__ import print_function
 
 from reader import EOS_WORD
+from progress.bar import Bar
 import tensorflow as tf, os, cPickle as pkl, numpy as np
 from nltk.tokenize import word_tokenize as tokenizer
 import argparse, codecs
@@ -226,12 +227,16 @@ class LanguageModel(object):
   def reorder_sentences(self, input_filename, sep):
     fw = codecs.open('%s.lm'%input_filename, 'w', 'utf-8')
 
-    for line in codecs.open(input_filename, 'r', 'utf-8'):
+    lines = codecs.open(input_filename, 'r', 'utf-8').readlines()
+
+    bar = Bar('LM Reordering', max=len(lines))
+    for line in lines:
       parts = line.split(sep)
       parts = [part.strip() for part in parts]
 
       #There is nothing to do
       if len(parts) <= 2:
+        bar.next()
         continue
 
       base_qs = parts[0]
@@ -245,6 +250,7 @@ class LanguageModel(object):
         write_data.append(sorted_variation[0])
 
       fw.write(sep.join(write_data) + '\n')
+      bar.next()
 
 DEF_MODEL_DIR='trained-models/lm'
 
