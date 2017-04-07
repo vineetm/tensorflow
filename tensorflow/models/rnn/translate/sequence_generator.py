@@ -255,18 +255,24 @@ class SequenceGenerator(object):
   '''
   Get BLEU score for each hypothesis
   '''
-  def get_bleu_scores(self, list_hypothesis, references):
+  def get_bleu_scores(self, list_hypothesis, references, suffix=None):
 
     bleu_scores = []
     #Write all the references
     ref_string = ''
     for index, reference in enumerate(references):
       ref_file = os.path.join(self.model_path, 'ref%d.txt'%index)
+      if suffix is not None:
+        ref_file = '%s.%s'%(ref_file, suffix)
+
       with codecs.open(ref_file, 'w', 'utf-8') as f:
         f.write(reference.strip() + '\n')
       ref_string += ' %s'%ref_file
 
     hyp_file = os.path.join(self.model_path, 'hyp.txt')
+    if suffix is not None:
+      hyp_file = '%s.%s' % (hyp_file, suffix)
+
     for index, hypothesis in enumerate(list_hypothesis):
       with codecs.open(hyp_file, 'w', 'utf-8') as f:
         f.write(hypothesis.strip() + '\n')
@@ -286,9 +292,11 @@ class SequenceGenerator(object):
     return bleu_scores
 
 
-  def write_bleu_data(self, max_refs, input_sentences, selected_hypothesis, all_references, report_data):
+  def write_bleu_data(self, max_refs, input_sentences, selected_hypothesis, all_references, report_data, suffix=None):
     #Write all references
     ref_file_names = [os.path.join(self.model_path, 'all_ref%d.txt' % index) for index in range(max_refs)]
+    if suffix is not None:
+      ref_file_names = ['%s.%s'%(ref_file_name, suffix) for ref_file_name in ref_file_names]
     ref_fw = [codecs.open(file_name, 'w', 'utf-8') for file_name in ref_file_names]
 
     for references in all_references:
@@ -298,17 +306,27 @@ class SequenceGenerator(object):
 
     #Write hypothesis
     hyp_file = os.path.join(self.model_path, 'all_hyp.txt')
+    if suffix is not None:
+      hyp_file = '%s.%s'%(hyp_file, suffix)
     hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
     for hyp in selected_hypothesis:
       hyp_fw.write(hyp)
     hyp_fw.close()
 
-    inp_fw = codecs.open(os.path.join(self.model_path, 'all_inputs.txt'), 'w', 'utf-8')
+    all_inputs_fname = os.path.join(self.model_path, 'all_inputs.txt')
+    if suffix is not None:
+      all_inputs_fname = '%s.%s'%(all_inputs_fname, suffix)
+    inp_fw = codecs.open(all_inputs_fname, 'w', 'utf-8')
+
     for input_sentence in input_sentences:
       inp_fw.write(input_sentence + '\n')
     inp_fw.close()
 
-    fw_report = codecs.open(os.path.join(self.model_path, 'report.txt'), 'w', 'utf-8')
+    report_fname = os.path.join(self.model_path, 'report.txt')
+    if suffix is not None:
+      report_fname = '%s.%s'%(report_fname, suffix)
+
+    fw_report = codecs.open(report_fname, 'w', 'utf-8')
     for write_data in report_data:
       fw_report.write('\t'.join(write_data) + '\n')
     fw_report.close()
@@ -325,11 +343,18 @@ class SequenceGenerator(object):
     return lines
 
 
-  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True, entity=False, phrase=False):
+  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True,
+                            entity=False, phrase=False, suffix=None):
+    if suffix is not None:
+      self.eval_file = '%s.%s'%(self.eval_file, suffix)
+
     eval_lines = self.read_lines(self.eval_file)
 
     #Load saved results, if present
-    translations_fname = os.path.join(self.model_path, TRANSLATIONS_FILE)
+    translations_fname = os.path.join(self.model_path, '%s.%s'%(self.eval_file, TRANSLATIONS_FILE))
+    if suffix is not None:
+      translations_fname = '%s.%s'%(translations_fname, suffix)
+
     save_tx = False
     if os.path.exists(translations_fname):
       fr = open(translations_fname)
@@ -379,7 +404,7 @@ class SequenceGenerator(object):
       list_hypothesis = [hyp[0] for hyp in all_hypothesis]
       # list_hypothesis = [self.sa.replace_phrase(hyp) for hyp in list_hypothesis]
 
-      bleu_scores = self.get_bleu_scores(list_hypothesis, references)
+      bleu_scores = self.get_bleu_scores(list_hypothesis, references, suffix)
       # bleu_scores = self.get_nltk_bleu_scores(list_hypothesis, references)
       if len(bleu_scores) > 0:
         best_index = np.argmax(bleu_scores)
@@ -394,7 +419,7 @@ class SequenceGenerator(object):
       all_references.append(references)
       report_data.append(write_data)
     end_time = time.time()
-    final_bleu = self.write_bleu_data(max_refs, input_sentences, selected_hypothesis, all_references, report_data)
+    final_bleu = self.write_bleu_data(max_refs, input_sentences, selected_hypothesis, all_references, report_data, suffix)
 
     if save_tx:
       logging.info('Saving tx to %s' % translations_fname)
@@ -490,6 +515,7 @@ def setup_args():
   parser.add_argument('-paralex', dest='paralex', default=False, action='store_true')
   parser.add_argument('-unk_tx', dest='unk_tx', default=False, action='store_true')
   parser.add_argument('-min_prob', default=0.001, type=float)
+  parser.add_argument('-suffix', default=None, help='Eval file suffix')
   args = parser.parse_args()
   return args
 
@@ -506,10 +532,10 @@ def main():
   if args.bleu:
     if args.entity:
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=False, progress=args.progress,
-                               entity=args.entity, phrase=args.phrase)
+                               entity=args.entity, phrase=args.phrase, suffix=args.suffix)
     else:
       sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=args.unk_tx, progress=args.progress,
-                               entity=False, phrase=args.phrase)
+                               entity=False, phrase=args.phrase, suffix=args.suffix)
   elif args.deep_qa:
     sg.generate_deepqa_qs_para(beam_size=args.beam_size, qs_file=args.qs_file, phrase=args.phrase, entity=args.entity, min_prob=args.min_prob)
   elif args.paralex:
