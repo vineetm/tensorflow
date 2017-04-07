@@ -201,6 +201,8 @@ class LanguageModel(object):
     # Lower case, tokenize, generate token #s
     sentence = sentence.lower()
     tokens = tokenizer(sentence)
+    if len(tokens) <= 1:
+      return 0.0
 
     token_ids = [self.word_to_id[token] for token in tokens]
     token_ids.insert(0, self.word_to_id[EOS_WORD])
@@ -224,7 +226,7 @@ class LanguageModel(object):
 
     return total_prob / (len(token_ids) - 1)
 
-  def reorder_sentences(self, input_filename, sep):
+  def reorder_sentences(self, input_filename, sep, min_prob=0.1):
     fw = codecs.open('%s.lm'%input_filename, 'w', 'utf-8')
 
     lines = codecs.open(input_filename, 'r', 'utf-8').readlines()
@@ -234,18 +236,16 @@ class LanguageModel(object):
       parts = line.split(sep)
       parts = [part.strip() for part in parts]
 
-      #There is nothing to do
-      if len(parts) <= 2:
+      if len(parts) == 0:
+        fw.write('\n')
         bar.next()
         continue
 
-      base_qs = parts[0]
       lm_scores = [(part, self.compute_prob(part)) for part in parts]
       lm_scores = sorted(lm_scores, key=lambda x:x[1], reverse=True)
 
+      lm_scores = [lm_score for lm_score in lm_scores if lm_score[1] > min_prob]
       write_data = []
-      write_data.append(base_qs)
-
       for sorted_variation in lm_scores:
         write_data.append(sorted_variation[0])
 
@@ -260,6 +260,7 @@ def setup_args():
   parser.add_argument('input', help='Sentences file')
   parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
   parser.add_argument('-sep', default=';', help='Sentence separator')
+  parser.add_argument('-min_prob', default='0.1', type=float)
   args = parser.parse_args()
   return args
 
@@ -275,7 +276,7 @@ def main():
   p = lm.compute_prob(test_qs)
   logging.info('Pr(%s): %.2f'%(test_qs, p))
 
-  lm.reorder_sentences(args.input, args.sep)
+  lm.reorder_sentences(args.input, args.sep, args.min_prob)
 
 if __name__ == '__main__':
   main()
