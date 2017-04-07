@@ -59,7 +59,7 @@ from __future__ import print_function
 from reader import EOS_WORD
 import tensorflow as tf, os, cPickle as pkl, numpy as np
 from nltk.tokenize import word_tokenize as tokenizer
-
+import argparse, codecs
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
 
@@ -222,3 +222,54 @@ class LanguageModel(object):
       total_prob += prob
 
     return total_prob / (len(token_ids) - 1)
+
+  def reorder_sentences(self, input_filename, sep):
+    fw = codecs.open('%s.lm'%input_filename, 'w', 'utf-8')
+
+    for line in codecs.open(input_filename, 'r', 'utf-8'):
+      parts = line.split(sep)
+      parts = [part.strip() for part in parts]
+
+      #There is nothing to do
+      if len(parts) <= 2:
+        continue
+
+      base_qs = parts[0]
+      lm_scores = [(part, self.compute_prob(part)) for part in parts]
+      lm_scores = sorted(lm_scores, key=lambda x:x[1], reverse=True)
+
+      write_data = []
+      write_data.append(base_qs)
+
+      for sorted_variation in lm_scores:
+        write_data.append(sorted_variation[0])
+
+      fw.write(sep.join(write_data) + '\n')
+
+DEF_MODEL_DIR='trained-models/lm'
+
+
+def setup_args():
+  parser = argparse.ArgumentParser()
+  parser.add_argument('input', help='Sentences file')
+  parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
+  parser.add_argument('-sep', default=';', help='Sentence separator')
+  args = parser.parse_args()
+  return args
+
+
+def main():
+  args = setup_args()
+  logging.info(args)
+
+  lm = LanguageModel(args.model_dir, args.model_dir)
+
+  #Test LM
+  test_qs = 'How are you doing?'
+  p = lm.compute_prob(test_qs)
+  logging.info('Pr(%s): %.2f'%(test_qs, p))
+
+  lm.reorder_sentences(args.input, args.sep)
+
+if __name__ == '__main__':
+  main()
