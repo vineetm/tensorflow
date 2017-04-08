@@ -6,7 +6,7 @@ EVAL_COMMAND = 'python sequence_generator.py -model_dir %s -bleu -eval_file %s'
 EVAL_COMMAND_UNK_TX = EVAL_COMMAND + ' -unk_tx'
 EVAL_COMMAND_UNK_SUFFIX= EVAL_COMMAND_UNK_TX + ' -suffix p%d'
 
-JBSUB_COMMAND = 'jbsub -name %s -out %s -proj %s -cores 1x1+1 -q %s %s'
+JBSUB_COMMAND = 'jbsub -name %s -out %s -proj %s -cores 1x1+1 -q %s -mem %s %s'
 
 
 def setup_args():
@@ -18,6 +18,7 @@ def setup_args():
   parser.add_argument('-q', default='x86_1h', help='Job queue')
   parser.add_argument('-proj', default='test', help='Project')
   parser.add_argument('-workers', default=1, help='Num of eval jobs', type=int)
+  parser.add_argument('-mem', default='4g', help='Mem per job')
   args = parser.parse_args()
   return args
 
@@ -26,7 +27,7 @@ def submit_eval_jobs(args):
   if args.workers == 1:
     python_command = EVAL_COMMAND_UNK_TX%(args.model_dir, args.eval_file)
     out_file = os.path.join(args.model_dir, 'test.out')
-    command = JBSUB_COMMAND%(args.job_name, out_file, args.proj, args.q, python_command)
+    command = JBSUB_COMMAND%(args.job_name, out_file, args.proj, args.q, args.mem, python_command)
     logging.info('CMD: %s'%command)
     status, output = commands.getstatusoutput(command)
     if status:
@@ -38,8 +39,10 @@ def submit_eval_jobs(args):
       python_command = EVAL_COMMAND_UNK_SUFFIX % (args.model_dir, args.eval_file, worker_num)
       job_name = '%s-%d'%(args.job_name, worker_num)
       worker_out_file = '%s-%d'%(out_file, worker_num)
-      command = JBSUB_COMMAND % (job_name, worker_out_file, args.proj, args.q, python_command)
-      logging.info(command)
+      command = JBSUB_COMMAND % (job_name, worker_out_file, args.proj, args.q, args.mem ,python_command)
+      status, output = commands.getstatusoutput(command)
+      if status:
+        print output
 
 
 def split_eval_file(args):
