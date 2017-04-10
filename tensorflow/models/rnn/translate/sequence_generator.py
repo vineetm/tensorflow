@@ -491,7 +491,10 @@ class SequenceGenerator(object):
     for qs in codecs.open(qs_file, 'r', 'utf-8'):
       variations = self.generate_topk_sequences(qs.lower(), tokenize=True, unk_tx=True)
       variations = [variation[0] for variation in variations if variation[1] >= min_prob]
-      var_fw.write(';'.join(variations) + '\n')
+      write_data = []
+      write_data.append(' '.join(tokenizer(qs.lower())))
+      write_data.extend(variations)
+      var_fw.write(';'.join(write_data) + '\n')
 
       bar.next()
     var_fw.close()

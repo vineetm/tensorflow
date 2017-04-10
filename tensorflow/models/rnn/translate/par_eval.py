@@ -10,7 +10,7 @@ DATA_PARTS_REP = ['all_ref%d.txt']
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('model_dir')
-  parser.add_argument('workers', type=int)
+  parser.add_argument('-workers', type=int, default=100)
   parser.add_argument('-max_refs', default=10, type=int)
   args = parser.parse_args()
   return args

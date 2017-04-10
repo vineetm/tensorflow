@@ -34,7 +34,7 @@ def submit_eval_jobs(args):
       print output
 
   else:
-    out_file = os.path.join(args.model_dir, 'test.out')
+    out_file = os.path.join(args.model_dir, 'bleu-16.out')
     for worker_num in range(1, args.workers+1):
       python_command = EVAL_COMMAND_UNK_SUFFIX % (args.model_dir, args.eval_file, worker_num)
       job_name = '%s-%d'%(args.job_name, worker_num)

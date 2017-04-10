@@ -236,16 +236,17 @@ class LanguageModel(object):
       parts = line.split(sep)
       parts = [part.strip() for part in parts]
 
-      if len(parts) == 0:
-        fw.write('\n')
+      if len(parts) == 1:
+        fw.write(line)
         bar.next()
         continue
 
-      lm_scores = [(part, self.compute_prob(part)) for part in parts]
+      lm_scores = [(part, self.compute_prob(part)) for part in parts[1:]]
       lm_scores = sorted(lm_scores, key=lambda x:x[1], reverse=True)
 
       lm_scores = [lm_score for lm_score in lm_scores if lm_score[1] > min_prob]
       write_data = []
+      write_data.append(parts[0])
       for sorted_variation in lm_scores:
         write_data.append(sorted_variation[0])
 
