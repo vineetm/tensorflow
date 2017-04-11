@@ -63,6 +63,8 @@ from nltk.tokenize import word_tokenize as tokenizer
 import argparse, codecs
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
+from commons import execute_bleu_command, get_num_lines
+from progress.bar import Bar
 
 def data_type():
   return tf.float32
@@ -110,7 +112,7 @@ class LanguageModel(object):
     self.id_to_word = id_to_word
 
 
-  def __init__(self, data_path, model_path, config=LargeConfig):
+  def __init__(self, data_path, model_path, config=LargeConfig, max_refs=10):
     initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)
 
@@ -181,6 +183,7 @@ class LanguageModel(object):
     else:
       logging.error('No Model found at %s'%self.model_path)
       return
+    self.max_refs = max_refs
 
   @property
   def input_data(self):
@@ -253,15 +256,96 @@ class LanguageModel(object):
       fw.write(sep.join(write_data) + '\n')
       bar.next()
 
+  '''
+    Get BLEU score for each hypothesis
+    '''
+
+  def get_bleu_scores(self, list_hypothesis, references, suffix=None):
+
+    bleu_scores = []
+    # Write all the references
+    ref_string = ''
+    for index, reference in enumerate(references):
+      ref_file = os.path.join(self.model_path, 'ref%d.txt' % index)
+      if suffix is not None:
+        ref_file = '%s.%s' % (ref_file, suffix)
+
+      with codecs.open(ref_file, 'w', 'utf-8') as f:
+        f.write(reference.strip() + '\n')
+      ref_string += ' %s' % ref_file
+
+    hyp_file = os.path.join(self.model_path, 'hyp.txt')
+    if suffix is not None:
+      hyp_file = '%s.%s' % (hyp_file, suffix)
+
+    for index, hypothesis in enumerate(list_hypothesis):
+      with codecs.open(hyp_file, 'w', 'utf-8') as f:
+        f.write(hypothesis.strip() + '\n')
+
+      bleu = execute_bleu_command(ref_string, hyp_file)
+      bleu_scores.append(bleu)
+    return bleu_scores
+
+  def merge_models(self, eval_file, report_file, beam_size, model1_tx_fname):
+    eval_lines = codecs.open(eval_file, 'r', 'utf-8').readlines()
+    model1_tx = pkl.load(open(model1_tx_fname))
+
+    #References file fw
+    ref_file_names = [os.path.join('all_ref%d.txt' % index) for index in range(self.max_refs)]
+    ref_fw = [codecs.open(file_name, 'w', 'utf-8') for file_name in ref_file_names]
+
+    # Hyp file fw
+    hyp_file = os.path.join('all_hyp.txt')
+    hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
+
+    # #Report file fw
+    # report_fname = os.path.join(report_file)
+
+    bar = Bar('Merge Models', max=len(eval_lines))
+    for index, line in enumerate(eval_lines):
+      parts = line.split('\t')
+
+      #Fill in the gold references
+      references = [part for part in parts[1:]][:self.max_refs]
+      rem_ref = self.max_refs - len(references)
+      references.extend(['' for _ in range(rem_ref)])
+      for ref_index, reference in enumerate(references):
+        ref_fw[ref_index].write(reference.strip() + '\n')
+
+      input_sentence = parts[0]
+      all_hypothesis = model1_tx[index][:beam_size]
+      list_hypothesis = [hyp[0] for hyp in all_hypothesis]
+
+      bleu_scores = self.get_bleu_scores(list_hypothesis, references)
+      if len(bleu_scores) > 0:
+        best_index = np.argmax(bleu_scores)
+        hyp_fw.write(list_hypothesis[best_index].strip() + '\n')
+      else:
+        hyp_fw.write('\n')
+
+      bar.next()
+
+    [fw.close() for fw in ref_fw]
+    ref_str = ' '.join(ref_file_names)
+    final_bleu = execute_bleu_command(ref_str, hyp_file)
+    logging.info('Final BLEU: %f'%final_bleu)
+
+
 DEF_MODEL_DIR='trained-models/lm'
 
 
 def setup_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument('input', help='Sentences file')
+  parser.add_argument('-input', help='Sentences file')
   parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
   parser.add_argument('-sep', default=';', help='Sentence separator')
   parser.add_argument('-min_prob', default='0.1', type=float)
+
+  parser.add_argument('-merge', default=False, action='store_true')
+  parser.add_argument('-eval_file', default='eval.data')
+  parser.add_argument('-model1_tx', default=None)
+  parser.add_argument('-beam_size', type=int, default=16)
+  parser.add_argument('-report_file', default='report.txt')
   args = parser.parse_args()
   return args
 
@@ -277,7 +361,10 @@ def main():
   p = lm.compute_prob(test_qs)
   logging.info('Pr(%s): %.2f'%(test_qs, p))
 
-  lm.reorder_sentences(args.input, args.sep, args.min_prob)
+  if not args.merge:
+    lm.reorder_sentences(args.input, args.sep, args.min_prob)
+  else:
+    lm.merge_models(args.eval_file, args.report_file, args.beam_size, args.model1_tx)
 
 if __name__ == '__main__':
   main()
