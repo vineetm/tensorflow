@@ -47,6 +47,10 @@ _DIGIT_RE = re.compile(br"\d")
 _WMT_ENFR_TRAIN_URL = "http://www.statmt.org/wmt10/training-giga-fren.tar"
 _WMT_ENFR_DEV_URL = "http://www.statmt.org/wmt15/dev-v2.tgz"
 
+import tensorflow as tf
+logging = tf.logging
+logging.set_verbosity(logging.INFO)
+
 
 def maybe_download(directory, filename, url):
   """Download filename from url unless it's already in directory."""
@@ -129,14 +133,14 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
     normalize_digits: Boolean; if true, all digits are replaced by 0s.
   """
   if not gfile.Exists(vocabulary_path):
-    print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
+    logging.info('Creating vocabulary %s from data %s' % (vocabulary_path, data_path))
     vocab = {}
     with gfile.GFile(data_path, mode="rb") as f:
       counter = 0
       for line in f:
         counter += 1
         if counter % 100000 == 0:
-          print("  processing line %d" % counter)
+          logging.info("  processing line %d" % counter)
         tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
         for w in tokens:
           word = re.sub(_DIGIT_RE, b"0", w) if normalize_digits else w
@@ -228,7 +232,7 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
     normalize_digits: Boolean; if true, all digits are replaced by 0s.
   """
   if not gfile.Exists(target_path):
-    print("Tokenizing data in %s" % data_path)
+    logging.info("Tokenizing data in %s" % data_path)
     vocab, _ = initialize_vocabulary(vocabulary_path)
     with gfile.GFile(data_path, mode="rb") as data_file:
       with gfile.GFile(target_path, mode="w") as tokens_file:
@@ -236,7 +240,7 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
         for line in data_file:
           counter += 1
           if counter % 100000 == 0:
-            print("  tokenizing line %d" % counter)
+            logging.info("  tokenizing line %d" % counter)
           token_ids = sentence_to_token_ids(line, vocab, tokenizer,
                                             normalize_digits)
           tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")

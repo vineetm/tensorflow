@@ -66,16 +66,29 @@ logging.set_verbosity(tf.logging.INFO)
 from commons import execute_bleu_command, get_num_lines
 from progress.bar import Bar
 
+NOT_SET = -99.0
+
 def data_type():
   return tf.float32
 
 class Candidate(object):
-  def __init__(self, text, seq2seq_score, lm_score, bleu_score, model):
+  def __init__(self, text, seq2seq_score, model):
     self.text = text
     self.seq2seq_score = seq2seq_score
-    self.lm_score = lm_score
-    self.bleu_score = bleu_score
     self.model = model
+    self.lm_score = NOT_SET
+    self.bleu_score = NOT_SET
+    self.final_score = NOT_SET
+
+  def set_final_score(self, lm_weight):
+    assert self.lm_score != NOT_SET
+    assert self.seq2seq_score != NOT_SET
+    assert lm_weight >= 0.0
+    assert lm_weight <= 1.0
+
+    assert self.final_score == NOT_SET
+    self.final_score = (lm_weight * self.lm_score) + ((1 - lm_weight) * self.seq2seq_score)
+
 
   def set_lm_score(self, lm_score):
     self.lm_score = lm_score
@@ -84,7 +97,7 @@ class Candidate(object):
     self.bleu_score = bleu_score
 
   def str_scores(self):
-    return 'S: %.2f LM: %.2f B: %.2f'%(self.seq2seq_score, self.lm_score, self.bleu_score)
+    return 'Final: %.4f[S: %.4f LM: %.4f] B: %.2f'%(self.final_score, self.seq2seq_score, self.lm_score, self.bleu_score)
 
 class SmallConfig(object):
   """Small config."""
@@ -317,10 +330,10 @@ class LanguageModel(object):
   '''
   First obtain the translation file mapping for each model
   '''
-  def fetch_candidate_hypothesis(self, models_file, beam_size):
+  def fetch_candidate_hypothesis(self, args):
     candidates = {}
     models_map = {}
-    for line in open(models_file):
+    for line in open(args.models_file):
       if line[0] == '#':
         continue
       parts = line.split(';')
@@ -333,13 +346,22 @@ class LanguageModel(object):
       fr = open(models_map[model_name])
       tx = pkl.load(fr)
 
+      num_completed = 0
       for eval_index in tx:
         if eval_index not in candidates:
           candidates[eval_index] = []
 
-        m_candidates = [Candidate(model=model_name, text=c[0], seq2seq_score=c[1],
-                                  lm_score=-99.0, bleu_score=-99.0) for c in tx[eval_index][:beam_size]]
+        m_candidates = [Candidate(model=model_name, text=c[0], seq2seq_score=c[1]) for c in tx[eval_index][:args.beam_size]]
+
+        lm_scores = [self.compute_prob(candidate.text) for candidate in m_candidates]
+        for m_candidate, lm_score in zip(m_candidates, lm_scores):
+          m_candidate.set_lm_score(lm_score)
+
         candidates[eval_index].extend(m_candidates)
+        num_completed += 1
+        if num_completed % 10 == 0:
+          logging.info('Model:%s LM computation done: %d'%(model_name, num_completed))
+
     return candidates
 
 
@@ -363,9 +385,27 @@ class LanguageModel(object):
     bleu = execute_bleu_command(' '.join(ref_files), hyp_file)
     return bleu
 
+  def rescore_candidates(self, all_candidates, args):
+    for eval_index in all_candidates:
+      candidates = all_candidates[eval_index]
+      [candidate.set_final_score(args.lm_weight) for candidate in candidates]
+      sorted_candidates = sorted(candidates, key = lambda c:c.final_score, reverse=True)
+      all_candidates[eval_index] = sorted_candidates
+
 
   def merge_models(self, args):
-    all_candidates = self.fetch_candidate_hypothesis(args.models_file, args.beam_size)
+    saved_candidates_file = os.path.join(args.exp_dir, 'candidates.m_%s.lm_%s.pkl'%(args.models_file, args.model_dir))
+    if os.path.exists(saved_candidates_file):
+      all_candidates = pkl.load(open(saved_candidates_file))
+      logging.info('Loaded Saved candidates from %s'%saved_candidates_file)
+    else:
+      all_candidates = self.fetch_candidate_hypothesis(args)
+      with open(saved_candidates_file, 'w') as f:
+        pkl.dump(all_candidates, f)
+      logging.info('Saved candidates to %s'%saved_candidates_file)
+
+    self.rescore_candidates(all_candidates, args)
+    logging.info('Rescored candidates as per LM scores')
     logging.info('Num Candidates: %d index[0]:%d'%(len(all_candidates), len(all_candidates[0])))
 
     eval_index = 0
@@ -390,7 +430,6 @@ class LanguageModel(object):
       header_data.append('Model')
       header_data.append('Scores')
 
-
     report_fw.write('\t'.join(header_data) + '\n')
 
     for eval_line in codecs.open(args.eval_file, 'r', 'utf-8'):
@@ -404,7 +443,8 @@ class LanguageModel(object):
       references = parts[1:][:args.max_refs]
       candidate_sentences = [candidate.text for candidate in all_candidates[eval_index]]
 
-      bleu_scores_recall = [self.compute_bleu_multiple_references(args.exp_dir, reference, candidate_sentences) for reference in references]
+      bleu_scores_recall = [self.compute_bleu_multiple_references(args.exp_dir, reference, candidate_sentences)
+                            for reference in references]
       avg_recall = np.average(bleu_scores_recall)
 
       if len(candidate_sentences) == 0:
@@ -414,7 +454,7 @@ class LanguageModel(object):
       else:
         bleu_scores_precision = np.array([self.compute_bleu_multiple_references(args.exp_dir, candidate, references) for candidate in
                                  candidate_sentences])
-        avg_precision = np.average(bleu_scores_precision)
+        avg_precision = np.average(bleu_scores_precision[:args.beam_size])
         arg_max_pr = np.argmax(bleu_scores_precision)
         max_precision = np.max(bleu_scores_precision)
 
@@ -465,7 +505,7 @@ def setup_args():
   parser.add_argument('-beam_size', type=int, default=16)
   parser.add_argument('-exp_dir', default=None)
   parser.add_argument('-models_file', default=None)
-  parser.add_argument('-skip_lm', default=False, action='store_true')
+  parser.add_argument('-lm_weight', default=0.0, type=float)
   args = parser.parse_args()
   return args
 
