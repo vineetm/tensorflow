@@ -443,9 +443,6 @@ class LanguageModel(object):
       report_fw.write('\t'.join(write_data) + '\n')
 
       eval_index += 1
-      if eval_index == 10:
-        return
-
       if eval_index % 100 == 0:
         logging.info('Completed: %d Average Precision: %.2f Recall: %.2f'
                      % (eval_index, np.average(eval_precision), np.average(eval_recall)))
