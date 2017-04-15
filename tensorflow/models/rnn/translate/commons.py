@@ -52,16 +52,12 @@ from nltk.corpus import stopwords
 def execute_bleu_command(ref_file, hyp_file):
   command = './multi-bleu.perl %s < %s' % (ref_file, hyp_file)
   status, output = commands.getstatusoutput(command)
-  if status:
-    print(output)
-
   match = re.search(r'BLEU\ \=\ (\d+\.\d+)', output)
   if match:
     return float(match.group(1))
   else:
-    print 'BLEU not found! %s' % output
+    logging.warning('BLEU not found! %s' % output)
     return 0.0
-
 
 def get_bleu_score(reference, hypothesis, base_dir=None):
     ref_file = REF

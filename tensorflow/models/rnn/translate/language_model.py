@@ -69,6 +69,23 @@ from progress.bar import Bar
 def data_type():
   return tf.float32
 
+class Candidate(object):
+  def __init__(self, text, seq2seq_score, lm_score, bleu_score, model):
+    self.text = text
+    self.seq2seq_score = seq2seq_score
+    self.lm_score = lm_score
+    self.bleu_score = bleu_score
+    self.model = model
+
+  def set_lm_score(self, lm_score):
+    self.lm_score = lm_score
+
+  def set_bleu_score(self, bleu_score):
+    self.bleu_score = bleu_score
+
+  def str_scores(self):
+    return 'S: %.2f LM: %.2f B: %.2f'%(self.seq2seq_score, self.lm_score, self.bleu_score)
+
 class SmallConfig(object):
   """Small config."""
   init_scale = 0.1
@@ -112,7 +129,7 @@ class LanguageModel(object):
     self.id_to_word = id_to_word
 
 
-  def __init__(self, data_path, model_path, config=LargeConfig, max_refs=10):
+  def __init__(self, data_path, model_path, config=LargeConfig):
     initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)
 
@@ -183,7 +200,6 @@ class LanguageModel(object):
     else:
       logging.error('No Model found at %s'%self.model_path)
       return
-    self.max_refs = max_refs
 
   @property
   def input_data(self):
@@ -260,13 +276,13 @@ class LanguageModel(object):
     Get BLEU score for each hypothesis
     '''
 
-  def get_bleu_scores(self, list_hypothesis, references, suffix=None):
+  def get_bleu_scores(self, exp_dir, eval_candidates, references, suffix=None):
 
     bleu_scores = []
     # Write all the references
     ref_string = ''
     for index, reference in enumerate(references):
-      ref_file = os.path.join(self.model_path, 'ref%d.txt' % index)
+      ref_file = os.path.join(exp_dir, 'ref%d.txt' % index)
       if suffix is not None:
         ref_file = '%s.%s' % (ref_file, suffix)
 
@@ -274,62 +290,167 @@ class LanguageModel(object):
         f.write(reference.strip() + '\n')
       ref_string += ' %s' % ref_file
 
-    hyp_file = os.path.join(self.model_path, 'hyp.txt')
+    hyp_file = os.path.join(exp_dir, 'hyp.txt')
     if suffix is not None:
       hyp_file = '%s.%s' % (hyp_file, suffix)
 
-    for index, hypothesis in enumerate(list_hypothesis):
+    for eval_candidate in eval_candidates:
       with codecs.open(hyp_file, 'w', 'utf-8') as f:
-        f.write(hypothesis.strip() + '\n')
+        f.write(eval_candidate.text.strip() + '\n')
 
       bleu = execute_bleu_command(ref_string, hyp_file)
       bleu_scores.append(bleu)
     return bleu_scores
 
-  def merge_models(self, eval_file, report_file, beam_size, model1_tx_fname):
-    eval_lines = codecs.open(eval_file, 'r', 'utf-8').readlines()
-    model1_tx = pkl.load(open(model1_tx_fname))
 
-    #References file fw
-    ref_file_names = [os.path.join('all_ref%d.txt' % index) for index in range(self.max_refs)]
-    ref_fw = [codecs.open(file_name, 'w', 'utf-8') for file_name in ref_file_names]
+  def read_eval_data(self, eval_file):
+    fr = codecs.open(eval_file, 'r', 'utf-8')
+    eval_lines = fr.readlines()
+    fr.close()
 
-    # Hyp file fw
-    hyp_file = os.path.join('all_hyp.txt')
+    all_parts = [eval_line.split('\t') for eval_line in eval_lines]
+    len_parts = [len(parts) for parts in all_parts]
+    max_len = max(len_parts)
+
+    return eval_lines, max_len-1
+
+  '''
+  First obtain the translation file mapping for each model
+  '''
+  def fetch_candidate_hypothesis(self, models_file, beam_size):
+    candidates = {}
+    models_map = {}
+    for line in open(models_file):
+      if line[0] == '#':
+        continue
+      parts = line.split(';')
+      logging.info(parts)
+      models_map[parts[0]] = parts[1].strip()
+    logging.info('Models Map: %s'%models_map)
+
+
+    for model_name in models_map:
+      fr = open(models_map[model_name])
+      tx = pkl.load(fr)
+
+      for eval_index in tx:
+        if eval_index not in candidates:
+          candidates[eval_index] = []
+
+        m_candidates = [Candidate(model=model_name, text=c[0], seq2seq_score=c[1],
+                                  lm_score=-99.0, bleu_score=-99.0) for c in tx[eval_index][:beam_size]]
+        candidates[eval_index].extend(m_candidates)
+    return candidates
+
+
+  def compute_bleu_multiple_references(self, exp_dir, hyp, references):
+    if hyp == '' or len(references) == 0:
+      return 0.0
+
+    hyp_file = os.path.join(exp_dir, 'temp-hyp.txt')
+    ref_files = [os.path.join(exp_dir, 'temp-ref%d.txt' % ref) for ref in range(len(references))]
+
+    ref_fws = [codecs.open(fname, 'w', 'utf-8') for fname in ref_files]
+    for index, reference in enumerate(references):
+      ref_fws[index].write(reference.strip() + '\n')
+
+    [ref_fw.close() for ref_fw in ref_fws]
+
     hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
+    hyp_fw.write(hyp.strip() + '\n')
+    hyp_fw.close()
 
-    # #Report file fw
-    # report_fname = os.path.join(report_file)
+    bleu = execute_bleu_command(' '.join(ref_files), hyp_file)
+    return bleu
 
-    bar = Bar('Merge Models', max=len(eval_lines))
-    for index, line in enumerate(eval_lines):
-      parts = line.split('\t')
 
-      #Fill in the gold references
-      references = [part for part in parts[1:]][:self.max_refs]
-      rem_ref = self.max_refs - len(references)
-      references.extend(['' for _ in range(rem_ref)])
-      for ref_index, reference in enumerate(references):
-        ref_fw[ref_index].write(reference.strip() + '\n')
+  def merge_models(self, args):
+    all_candidates = self.fetch_candidate_hypothesis(args.models_file, args.beam_size)
+    logging.info('Num Candidates: %d index[0]:%d'%(len(all_candidates), len(all_candidates[0])))
 
-      input_sentence = parts[0]
-      all_hypothesis = model1_tx[index][:beam_size]
-      list_hypothesis = [hyp[0] for hyp in all_hypothesis]
+    eval_index = 0
+    eval_precision = []
+    eval_recall = []
 
-      bleu_scores = self.get_bleu_scores(list_hypothesis, references)
-      if len(bleu_scores) > 0:
-        best_index = np.argmax(bleu_scores)
-        hyp_fw.write(list_hypothesis[best_index].strip() + '\n')
+    report_fw = codecs.open(os.path.join(args.exp_dir, 'report.txt'), 'w', 'utf-8')
+    header_data = []
+    header_data.append('Input Sentence')
+    header_data.append('Avg Precision')
+    header_data.append('Avg Recall')
+
+    header_data.append('Best Precision')
+    header_data.append('Best Recall')
+
+    for ref_num in range(args.max_refs):
+      header_data.append('Ref%d'% ref_num)
+      header_data.append('Bleu')
+
+    for cand_num in range(args.beam_size):
+      header_data.append('C%d'% cand_num)
+      header_data.append('Model')
+      header_data.append('Scores')
+
+
+    report_fw.write('\t'.join(header_data) + '\n')
+
+    for eval_line in codecs.open(args.eval_file, 'r', 'utf-8'):
+      write_data = []
+      parts = eval_line.split('\t')
+      parts = [part.strip() for part in parts]
+
+      input_qs = parts[0]
+      write_data.append(input_qs)
+
+      references = parts[1:][:args.max_refs]
+      candidate_sentences = [candidate.text for candidate in all_candidates[eval_index]]
+
+      bleu_scores_recall = [self.compute_bleu_multiple_references(args.exp_dir, reference, candidate_sentences) for reference in references]
+      avg_recall = np.average(bleu_scores_recall)
+
+      if len(candidate_sentences) == 0:
+        avg_precision = 0.0
+        arg_max_pr = 0
+        max_precision = 0.0
       else:
-        hyp_fw.write('\n')
+        bleu_scores_precision = np.array([self.compute_bleu_multiple_references(args.exp_dir, candidate, references) for candidate in
+                                 candidate_sentences])
+        avg_precision = np.average(bleu_scores_precision)
+        arg_max_pr = np.argmax(bleu_scores_precision)
+        max_precision = np.max(bleu_scores_precision)
 
-      bar.next()
+      write_data.append('%.2f' % avg_precision)
+      write_data.append('%.2f' % avg_recall)
 
-    [fw.close() for fw in ref_fw]
-    ref_str = ' '.join(ref_file_names)
-    final_bleu = execute_bleu_command(ref_str, hyp_file)
-    logging.info('Final BLEU: %f'%final_bleu)
+      write_data.append('%.2f[%d]' %(max_precision, arg_max_pr))
+      write_data.append('%.2f' %np.max(bleu_scores_recall))
 
+      # Write Recall Score
+      for reference, bleu_score in zip(references, bleu_scores_recall):
+        write_data.append('%s' %reference)
+        write_data.append('%.2f'%bleu_score)
+
+      eval_precision.append(avg_precision)
+      eval_recall.append(avg_recall)
+
+      # Write Precision Score
+      if len(bleu_scores_precision) > 0:
+        for candidate, bleu_score in zip(all_candidates[eval_index], bleu_scores_precision):
+          candidate.set_bleu_score(bleu_score)
+          write_data.append('%s'%candidate.text)
+          write_data.append('%s'%candidate.model)
+          write_data.append('%s'%candidate.str_scores())
+
+      report_fw.write('\t'.join(write_data) + '\n')
+
+      eval_index += 1
+      if eval_index == 10:
+        return
+
+      if eval_index % 100 == 0:
+        logging.info('Completed: %d Average Precision: %.2f Recall: %.2f'
+                     % (eval_index, np.average(eval_precision), np.average(eval_recall)))
+
+    logging.info('Average Precision: %.2f Recall: %.2f' % (np.average(eval_precision), np.average(eval_recall)))
 
 DEF_MODEL_DIR='trained-models/lm'
 
@@ -340,12 +461,14 @@ def setup_args():
   parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
   parser.add_argument('-sep', default=';', help='Sentence separator')
   parser.add_argument('-min_prob', default='0.1', type=float)
+  parser.add_argument('-max_refs', default=16, type=int)
 
   parser.add_argument('-merge', default=False, action='store_true')
   parser.add_argument('-eval_file', default='eval.data')
-  parser.add_argument('-model1_tx', default=None)
   parser.add_argument('-beam_size', type=int, default=16)
-  parser.add_argument('-report_file', default='report.txt')
+  parser.add_argument('-exp_dir', default=None)
+  parser.add_argument('-models_file', default=None)
+  parser.add_argument('-skip_lm', default=False, action='store_true')
   args = parser.parse_args()
   return args
 
@@ -364,7 +487,7 @@ def main():
   if not args.merge:
     lm.reorder_sentences(args.input, args.sep, args.min_prob)
   else:
-    lm.merge_models(args.eval_file, args.report_file, args.beam_size, args.model1_tx)
+    lm.merge_models(args)
 
 if __name__ == '__main__':
   main()
