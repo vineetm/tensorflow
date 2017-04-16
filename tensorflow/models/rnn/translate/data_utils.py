@@ -139,7 +139,7 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
       counter = 0
       for line in f:
         counter += 1
-        if counter % 100000 == 0:
+        if counter % 1000000 == 0:
           logging.info("  processing line %d" % counter)
         tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
         for w in tokens:
