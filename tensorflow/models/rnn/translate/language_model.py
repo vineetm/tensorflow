@@ -65,39 +65,12 @@ logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
 from commons import execute_bleu_command, get_num_lines
 from progress.bar import Bar
-
-NOT_SET = -99.0
+from translation_candidate import Candidate
+import ast
 
 def data_type():
   return tf.float32
 
-class Candidate(object):
-  def __init__(self, text, seq2seq_score, model):
-    self.text = text
-    self.seq2seq_score = seq2seq_score
-    self.model = model
-    self.lm_score = NOT_SET
-    self.bleu_score = NOT_SET
-    self.final_score = NOT_SET
-
-  def set_final_score(self, lm_weight):
-    assert self.lm_score != NOT_SET
-    assert self.seq2seq_score != NOT_SET
-    assert lm_weight >= 0.0
-    assert lm_weight <= 1.0
-
-    assert self.final_score == NOT_SET
-    self.final_score = (lm_weight * self.lm_score) + ((1 - lm_weight) * self.seq2seq_score)
-
-
-  def set_lm_score(self, lm_score):
-    self.lm_score = lm_score
-
-  def set_bleu_score(self, bleu_score):
-    self.bleu_score = bleu_score
-
-  def str_scores(self):
-    return 'Final: %.4f[S: %.4f LM: %.4f] B: %.2f'%(self.final_score, self.seq2seq_score, self.lm_score, self.bleu_score)
 
 class SmallConfig(object):
   """Small config."""
@@ -258,14 +231,28 @@ class LanguageModel(object):
 
     return total_prob / (len(token_ids) - 1)
 
-  def reorder_sentences(self, input_filename, sep, min_prob=0.1):
-    fw = codecs.open('%s.lm'%input_filename, 'w', 'utf-8')
+  def read_synonyms(self, args):
+    synonyms = {}
+    if args.synonyms is None:
+      return synonyms
 
-    lines = codecs.open(input_filename, 'r', 'utf-8').readlines()
+    json_data = open(args.synonyms).read()
+    json_data = ast.literal_eval(json_data)
+    return synonyms
+
+
+  def reorder_sentences_with_variations(self, args):
+    synonyms = self.read_synonyms(args)
+    logging.info('Synonyms: %s'%synonyms)
+    return
+    
+    fw = codecs.open('%s.lm'%args.input, 'w', 'utf-8')
+
+    lines = codecs.open(args.input, 'r', 'utf-8').readlines()
 
     bar = Bar('LM Reordering', max=len(lines))
     for line in lines:
-      parts = line.split(sep)
+      parts = line.split(args.sep)
       parts = [part.strip() for part in parts]
 
       if len(parts) == 1:
@@ -276,13 +263,13 @@ class LanguageModel(object):
       lm_scores = [(part, self.compute_prob(part)) for part in parts[1:]]
       lm_scores = sorted(lm_scores, key=lambda x:x[1], reverse=True)
 
-      lm_scores = [lm_score for lm_score in lm_scores if lm_score[1] > min_prob]
+      lm_scores = [lm_score for lm_score in lm_scores if lm_score[1] > args.min_prob]
       write_data = []
       write_data.append(parts[0])
       for sorted_variation in lm_scores:
         write_data.append(sorted_variation[0])
 
-      fw.write(sep.join(write_data) + '\n')
+      fw.write(args.sep.join(write_data) + '\n')
       bar.next()
 
   '''
@@ -495,7 +482,7 @@ DEF_MODEL_DIR='trained-models/lm'
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('-input', help='Sentences file')
-  parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
+  parser.add_argument('-model_dir', help='Trained Model Directory', default=None)
   parser.add_argument('-sep', default=';', help='Sentence separator')
   parser.add_argument('-min_prob', default='0.1', type=float)
   parser.add_argument('-max_refs', default=16, type=int)
@@ -506,6 +493,7 @@ def setup_args():
   parser.add_argument('-exp_dir', default=None)
   parser.add_argument('-models_file', default=None)
   parser.add_argument('-lm_weight', default=0.0, type=float)
+  parser.add_argument('-synonyms', default=None, help='Synonyms file')
   args = parser.parse_args()
   return args
 
@@ -522,7 +510,7 @@ def main():
   logging.info('Pr(%s): %.2f'%(test_qs, p))
 
   if not args.merge:
-    lm.reorder_sentences(args.input, args.sep, args.min_prob)
+    lm.reorder_sentences_with_variations(args)
   else:
     lm.merge_models(args)
 

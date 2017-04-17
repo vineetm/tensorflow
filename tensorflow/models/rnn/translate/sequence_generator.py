@@ -4,6 +4,7 @@ import tensorflow as tf
 import cPickle as pkl
 from seq2seq_model import Seq2SeqModel
 from data_utils import initialize_vocabulary, sentence_to_token_ids, EOS_ID
+from collections import Counter
 
 from nltk.tokenize import word_tokenize as tokenizer
 from commons import execute_bleu_command, get_num_lines
@@ -462,18 +463,45 @@ class SequenceGenerator(object):
     logging.info('Reading important words from %s'%args.imp_words)
     for line in codecs.open(args.imp_words, 'r', 'utf-8'):
       word = line.strip()
-      replaced_word = '%s%s'%(PREFIX, word)
+      replaced_word = '%s%s'%(PREFIX, word.lower())
       imp_words_map[word] = replaced_word
       rev_imp_words_map[replaced_word] = word
 
     return imp_words_map, rev_imp_words_map
 
-  def replace_and_filter_variations(self, args, variations, rev_imp_words_map):
+
+  def check_consecutive_repetitions(self, sentence):
+    tokens = sentence.split()
+    for index in range(len(tokens)):
+      if index == len(tokens)-1:
+        return False
+      if tokens[index] == tokens[index+1]:
+        return True
+    return False
+
+
+  def check_repetitions(self, sentence, MAX_COUNT):
+    if self.check_consecutive_repetitions(sentence):
+      return True
+    tokens = sentence.split()
+    counter = Counter(tokens)
+    for word, freq in counter.most_common():
+      if freq > MAX_COUNT:
+        return True
+    return False
+
+
+  def replace_and_filter_variations(self, args, variations, rev_imp_words_map, MAX_COUNT=3):
     variations = [variation[0] for variation in variations if variation[1] >= args.min_prob]
     final_variations = []
     for variation in variations:
-      replaced_variation = ' '.join([rev_imp_words_map[token] if token in rev_imp_words_map else token
-                            for token in variation.split()])
+      tokens = [rev_imp_words_map[token] if token in rev_imp_words_map else token
+                            for token in variation.split()]
+
+      replaced_variation = ' '.join(tokens)
+      if self.check_repetitions(replaced_variation, MAX_COUNT) is True:
+        continue
+
       final_variations.append(replaced_variation)
     return final_variations
 
@@ -524,7 +552,7 @@ def setup_args():
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
 
   parser.add_argument('-variations', default=False, help='Generate question variations', action='store_true')
-  parser.add_argument('-min_prob', default=0.001, type=float)
+  parser.add_argument('-min_prob', default=0.0001, type=float)
   parser.add_argument('-qs_file', dest='qs_file', default=None)
   parser.add_argument('-imp_words', default='imp_words.txt', help='List of important words')
 
