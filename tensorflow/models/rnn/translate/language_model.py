@@ -231,6 +231,7 @@ class LanguageModel(object):
 
     return total_prob / (len(token_ids) - 1)
 
+
   def read_synonyms(self, args):
     synonyms = {}
     if args.synonyms is None:
@@ -238,14 +239,30 @@ class LanguageModel(object):
 
     json_data = open(args.synonyms).read()
     json_data = ast.literal_eval(json_data)
-    return synonyms
+
+    for key in json_data:
+      variations = json_data[key][1:-1].split(',')
+      variations = [variation.strip()[1:-1] for variation in variations]
+      json_data[key] = variations
+    return json_data
+
+
+  def generate_synonym_variations(self, sentence, synonyms):
+    new_variations = []
+    tokens = sentence.split()
+    for replacement_token in tokens:
+      if replacement_token in synonyms:
+        for token_variation in synonyms[replacement_token]:
+          new_tokens = [token_variation if token == replacement_token else token
+           for token in tokens]
+          new_variations.append('SV: %s'%' '.join(new_tokens))
+    return new_variations
 
 
   def reorder_sentences_with_variations(self, args):
     synonyms = self.read_synonyms(args)
     logging.info('Synonyms: %s'%synonyms)
-    return
-    
+
     fw = codecs.open('%s.lm'%args.input, 'w', 'utf-8')
 
     lines = codecs.open(args.input, 'r', 'utf-8').readlines()
@@ -263,12 +280,13 @@ class LanguageModel(object):
       lm_scores = [(part, self.compute_prob(part)) for part in parts[1:]]
       lm_scores = sorted(lm_scores, key=lambda x:x[1], reverse=True)
 
-      lm_scores = [lm_score for lm_score in lm_scores if lm_score[1] > args.min_prob]
+      lm_scores = [lm_score[0] for lm_score in lm_scores if lm_score[1] > args.min_prob]
       write_data = []
       write_data.append(parts[0])
       for sorted_variation in lm_scores:
-        write_data.append(sorted_variation[0])
-
+        write_data.append(sorted_variation)
+        synonym_variations = self.generate_synonym_variations(sorted_variation, synonyms)
+        write_data.extend(synonym_variations)
       fw.write(args.sep.join(write_data) + '\n')
       bar.next()
 
@@ -482,7 +500,7 @@ DEF_MODEL_DIR='trained-models/lm'
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('-input', help='Sentences file')
-  parser.add_argument('-model_dir', help='Trained Model Directory', default=None)
+  parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
   parser.add_argument('-sep', default=';', help='Sentence separator')
   parser.add_argument('-min_prob', default='0.1', type=float)
   parser.add_argument('-max_refs', default=16, type=int)
