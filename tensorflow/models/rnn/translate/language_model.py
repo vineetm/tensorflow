@@ -260,6 +260,21 @@ class LanguageModel(object):
 
 
   def reorder_sentences_with_variations(self, args):
+    def remove_variations_with_symbols(variations):
+      def contains_unk(sentence):
+        tokens = sentence.split()
+        for token in tokens:
+          if token[:3] == 'UNK':
+            return True
+        return False
+
+      final_variations = []
+      for variation in variations:
+        if contains_unk(variation) is True:
+          continue
+        final_variations.append(variation)
+      return final_variations
+
     synonyms = self.read_synonyms(args)
     logging.info('Synonyms: %s'%synonyms)
 
@@ -281,6 +296,8 @@ class LanguageModel(object):
       lm_scores = sorted(lm_scores, key=lambda x:x[1], reverse=True)
 
       lm_scores = [lm_score[0] for lm_score in lm_scores if lm_score[1] > args.min_prob]
+      lm_scores = remove_variations_with_symbols(lm_scores)
+
       write_data = []
       write_data.append(parts[0])
       for sorted_variation in lm_scores:

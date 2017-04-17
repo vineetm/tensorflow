@@ -7,7 +7,7 @@ from data_utils import initialize_vocabulary, sentence_to_token_ids, EOS_ID
 from collections import Counter
 
 from nltk.tokenize import word_tokenize as tokenizer
-from commons import execute_bleu_command, get_num_lines
+from commons import execute_bleu_command, get_num_lines, load_pkl
 import numpy as np, argparse
 from progress.bar import Bar
 from symbol_assigner import SymbolAssigner
@@ -23,7 +23,7 @@ logging.set_verbosity(logging.INFO)
 DEF_MODEL_DIR = 'trained-models/seq2seq'
 
 class SequenceGenerator(object):
-  def __init__(self, model_dir=DEF_MODEL_DIR, eval_file=None, max_unk_symbols=8, entity=False, phrase=False):
+  def __init__(self, model_dir=DEF_MODEL_DIR, max_unk_symbols=8, entity=False, phrase=False):
 
     config_file_path = os.path.join(model_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
@@ -34,7 +34,6 @@ class SequenceGenerator(object):
 
     #Create session
     self.session = tf.Session()
-    self.eval_file = eval_file
 
     #Setup parameters using saved config
     self.model_path = config['train_dir']
@@ -141,13 +140,16 @@ class SequenceGenerator(object):
     output_sentences = [(input_sentence, self.generate_output_sequence(input_sentence)) for input_sentence in eval_sentences]
     pkl.dump(output_sentences, open('%s.%s.pkl'%('results', suffix), 'w'))
 
+
   def convert_to_prob(self, logit):
     exp_logit = np.exp(logit)
     return exp_logit / np.sum(exp_logit)
 
+
   def set_output_tokens(self, output_token_ids, decoder_inputs):
     for index in range(len(output_token_ids)):
       decoder_inputs[index + 1] = np.array([output_token_ids[index]], dtype=np.float32)
+
 
   def cleanup_final_translations(self, final_translations, source_sentence, phrase):
     sentences_set = set()
@@ -336,124 +338,59 @@ class SequenceGenerator(object):
     fr.close()
     return lines
 
+  def compute_bleu_multiple_references(self, file_prefix, hyp, references):
+    if hyp == '' or len(references) == 0:
+      return 0.0
 
-  def save_translations(self, args):
-    if args.suffix is not None:
-      self.eval_file = '%s.%s'%(self.eval_file, args.suffix)
+    hyp_file = '%s_%s'%(file_prefix, 'hyp.txt')
+    ref_files = ['%s_%s'%(file_prefix, 'ref%d.txt'%ref) for ref in range(len(references))]
 
-    eval_lines = self.read_lines(self.eval_file)
-    translations_fname = os.path.join(self.model_path, '%s.%s' % (self.eval_file, TRANSLATIONS_FILE))
-    if os.path.exists(translations_fname):
-      fr = open(translations_fname)
-      translations = pkl.load(fr)
-      fr.close()
-      assert len(translations) == len(eval_lines)
-      logging.info('Found tx from %s'%translations_fname)
-      return
+    ref_fws = [codecs.open(fname, 'w', 'utf-8') for fname in ref_files]
+    for index, reference in enumerate(references):
+      ref_fws[index].write(reference.strip() + '\n')
 
-    logging.info('No pre-computed tx found, computing...')
-    translations = {}
-    for index, line in enumerate(eval_lines):
-      parts = line.split('\t')
+    [ref_fw.close() for ref_fw in ref_fws]
+
+    hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
+    hyp_fw.write(hyp.strip() + '\n')
+    hyp_fw.close()
+
+    bleu = execute_bleu_command(' '.join(ref_files), hyp_file)
+    return bleu
+
+
+  def compute_average_bleu_scores(self, args):
+    translations_fname = os.path.join(args.model_dir, '%s.%s' % (args.eval_file, TRANSLATIONS_FILE))
+    translations = load_pkl(translations_fname)
+
+    eval_index = 0
+    for eval_line in codecs.open(args.eval_file, 'r', 'utf-8'):
+      parts = eval_line.split('\t')
       input_sentence = parts[0].strip()
-      if index not in translations:
-        all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=args.unk_tx, beam_size=args.beam_size,
-                                                      tokenize=False, entity=False, phrase=False)
+      references = [part.strip() for part in parts[1:]]
+
+      if eval_index not in translations:
+        all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=args.unk_tx,
+                                                      beam_size=args.beam_size, tokenize=False)
 
         all_candidates = [Candidate(hyp[0], seq2seq_score=hyp[1], model=args.label) for hyp in all_hypothesis]
-        translations[index] = all_hypothesis
 
-      logging.info('Done: %d'%index)
+        candidate_sentences = [candidate.text for candidate in all_candidates]
+        eval_prefix = os.path.join(args.model_dir, args.eval_file)
+        bleu_scores_precision = [self.compute_bleu_multiple_references(eval_prefix, candidate, references)
+                                 for candidate in candidate_sentences]
+
+        bleu_scores_recall = [self.compute_bleu_multiple_references(eval_prefix, reference, candidate_sentences)
+                                 for reference in references]
+
+        logging.info('Index: %d Pr:%s'%(eval_index, bleu_scores_precision))
+        logging.info('Index: %d Re:%s' % (eval_index, bleu_scores_recall))
+
+        eval_index += 1
 
     logging.info('Saving tx to %s' % translations_fname)
     with open(translations_fname, 'w') as ftr:
       pkl.dump(translations, ftr)
-
-
-  def get_corpus_bleu_score(self, max_refs, unk_tx, beam_size, progress=False, generate_report=True,
-                            entity=False, phrase=False, suffix=None):
-    if suffix is not None:
-      self.eval_file = '%s.%s'%(self.eval_file, suffix)
-
-    eval_lines = self.read_lines(self.eval_file)
-
-    #Load saved results, if present
-    translations_fname = os.path.join(self.model_path, '%s.%s'%(self.eval_file, TRANSLATIONS_FILE))
-    if suffix is not None:
-      translations_fname = '%s.%s'%(translations_fname, suffix)
-
-    save_tx = False
-    if os.path.exists(translations_fname):
-      fr = open(translations_fname)
-      translations = pkl.load(fr)
-      fr.close()
-      assert len(translations) == len(eval_lines)
-      logging.info('Loaded %d pre-computed tx from %s'%(len(translations), translations_fname))
-    else:
-      save_tx = True
-      translations = {}
-
-    start_time = time.time()
-    if progress:
-      N = get_num_lines(self.eval_file)
-      bar = Bar('computing bleu', max=N)
-
-    report_data = []
-    input_sentences = []
-    selected_hypothesis = []
-    all_references = []
-
-    for index, line in enumerate(eval_lines):
-      write_data=[]
-      parts = line.split('\t')
-
-      if progress:
-        bar.next()
-      else:
-        logging.info('Done %d'%index)
-      input_sentence = parts[0]
-
-      references = [part for part in parts[1:]][:max_refs]
-      rem_ref = max_refs - len(references)
-      references.extend(['' for _ in range(rem_ref)])
-
-      input_sentence = input_sentence.strip()
-      input_sentences.append(input_sentence)
-
-      write_data.append(input_sentence)
-      if index in translations:
-        all_hypothesis = translations[index][:beam_size]
-      else:
-        all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=unk_tx, beam_size=beam_size,
-                                                      tokenize=False, entity=entity, phrase=phrase)
-        translations[index] = all_hypothesis
-
-      list_hypothesis = [hyp[0] for hyp in all_hypothesis]
-      # list_hypothesis = [self.sa.replace_phrase(hyp) for hyp in list_hypothesis]
-
-      bleu_scores = self.get_bleu_scores(list_hypothesis, references, suffix)
-      # bleu_scores = self.get_nltk_bleu_scores(list_hypothesis, references)
-      if len(bleu_scores) > 0:
-        best_index = np.argmax(bleu_scores)
-        selected_hypothesis.append(list_hypothesis[best_index].strip() + '\n')
-      else:
-        selected_hypothesis.append('\n')
-
-      for index in range(len(list_hypothesis)):
-        write_data.append(list_hypothesis[index].strip())
-        write_data.append(str(bleu_scores[index]))
-
-      all_references.append(references)
-      report_data.append(write_data)
-    end_time = time.time()
-    final_bleu = self.write_bleu_data(max_refs, input_sentences, selected_hypothesis, all_references, report_data, suffix)
-
-    if save_tx:
-      logging.info('Saving tx to %s' % translations_fname)
-      with open(translations_fname, 'w') as ftr:
-        pkl.dump(translations, ftr)
-      logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, end_time - start_time))
-
 
   def get_imp_words_map(self, args):
     imp_words_map = {}
@@ -533,28 +470,22 @@ class SequenceGenerator(object):
 
 def setup_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument('-model_dir', help='Trained Model Directory', default=DEF_MODEL_DIR)
-  parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='eval.data')
-
-  parser.add_argument('-max_refs', dest='max_refs', default=10, type=int, help='Maximum references')
-  parser.add_argument('-progress', dest='progress', default=False, action='store_true')
-  parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
-  parser.add_argument('-phrase', dest='phrase', default=False, action='store_true')
-  parser.add_argument('-entity', dest='entity', default=False, action='store_true')
-
+  parser.add_argument('-model_dir', help='Trained Seq2Seq Model Directory', default=DEF_MODEL_DIR)
   parser.add_argument('-max_unk_symbols', default=8, type=int)
-  parser.add_argument('-deep_qa', dest='deep_qa', default=False, action='store_true')
-  parser.add_argument('-paralex', dest='paralex', default=False, action='store_true')
   parser.add_argument('-unk_tx', dest='unk_tx', default=False, action='store_true')
-  parser.add_argument('-suffix', default=None, help='Eval file suffix')
 
-  parser.add_argument('-save_tx', default=False, action='store_true', help='Save tx for model')
+  parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
+  parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='wa.eval')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
+  parser.add_argument('-max_refs', dest='max_refs', default=16, type=int, help='Maximum references')
+  parser.add_argument('-label', default='base', help='Model label')
 
+  #Options for question variation generator
   parser.add_argument('-variations', default=False, help='Generate question variations', action='store_true')
   parser.add_argument('-min_prob', default=0.0001, type=float)
   parser.add_argument('-qs_file', dest='qs_file', default=None)
   parser.add_argument('-imp_words', default='imp_words.txt', help='List of important words')
+  parser.add_argument('-progress', dest='progress', default=False, action='store_true')
 
   args = parser.parse_args()
   return args
@@ -563,16 +494,12 @@ def setup_args():
 def main():
   args = setup_args()
   logging.info(args)
-  sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, max_unk_symbols=args.max_unk_symbols,
-                         entity=args.entity, phrase=args.phrase)
+  sg = SequenceGenerator(model_dir=args.model_dir, max_unk_symbols=args.max_unk_symbols)
 
   if args.variations:
     sg.generate_variations(args)
-  elif args.save_tx:
-    sg.save_translations(args)
   elif args.bleu:
-    sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=args.unk_tx, progress=args.progress,
-                               entity=False, phrase=args.phrase, suffix=args.suffix)
+    sg.compute_average_bleu_scores(args)
 
 if __name__ == '__main__':
     main()

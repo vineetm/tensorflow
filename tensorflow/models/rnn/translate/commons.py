@@ -46,7 +46,17 @@ RESULTS_SUFFIX = 'results.pkl'
 
 LM_VOCAB_FILE = 'vocab.pkl'
 
+import cPickle as pkl
 from nltk.corpus import stopwords
+
+
+def load_pkl(fname):
+  data = {}
+  if os.path.exists(fname):
+    with open(fname) as fr:
+      data = pkl.load(fr)
+      logging.info('%s: Found %d stored data_items'%(fname, len(data)))
+  return data
 
 
 def execute_bleu_command(ref_file, hyp_file):

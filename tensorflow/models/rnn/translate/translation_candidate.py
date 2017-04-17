@@ -1,12 +1,12 @@
 NOT_SET = -99.0
 
 class Candidate(object):
-  def __init__(self, text, seq2seq_score, model):
+  def __init__(self, text, seq2seq_score, model, bleu_score=NOT_SET):
     self.text = text
     self.seq2seq_score = seq2seq_score
     self.model = model
+    self.bleu_score = bleu_score
     self.lm_score = NOT_SET
-    self.bleu_score = NOT_SET
     self.final_score = NOT_SET
 
   '''
