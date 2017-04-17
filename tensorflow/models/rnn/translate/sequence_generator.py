@@ -454,18 +454,51 @@ class SequenceGenerator(object):
       logging.info('Final BLEU: %.2f Time: %ds'%(final_bleu, end_time - start_time))
 
 
-  def generate_variations(self, qs_file, min_prob=0.001):
-    var_fw = codecs.open('%s.variations' % qs_file, 'w', 'utf-8')
-    N = get_num_lines(qs_file)
+  def get_imp_words_map(self, args):
+    imp_words_map = {}
+    rev_imp_words_map = {}
+
+    PREFIX = 'zreptok'
+    logging.info('Reading important words from %s'%args.imp_words)
+    for line in codecs.open(args.imp_words, 'r', 'utf-8'):
+      word = line.strip()
+      replaced_word = '%s%s'%(PREFIX, word)
+      imp_words_map[word] = replaced_word
+      rev_imp_words_map[replaced_word] = word
+
+    return imp_words_map, rev_imp_words_map
+
+  def replace_and_filter_variations(self, args, variations, rev_imp_words_map):
+    variations = [variation[0] for variation in variations if variation[1] >= args.min_prob]
+    final_variations = []
+    for variation in variations:
+      replaced_variation = ' '.join([rev_imp_words_map[token] if token in rev_imp_words_map else token
+                            for token in variation.split()])
+      final_variations.append(replaced_variation)
+    return final_variations
+
+  def generate_variations(self, args):
+    var_fw = codecs.open('%s.variations' % args.qs_file, 'w', 'utf-8')
+    N = get_num_lines(args.qs_file)
     bar = Bar('Generating variations', max=N)
-    for qs in codecs.open(qs_file, 'r', 'utf-8'):
-      variations = self.generate_topk_sequences(qs.lower(), tokenize=True, unk_tx=True)
-      variations = [variation[0] for variation in variations if variation[1] >= min_prob]
+
+    imp_words_map, rev_imp_words_map = self.get_imp_words_map(args)
+    logging.info('Important words map: %s'%imp_words_map)
+
+    for orig_qs in codecs.open(args.qs_file, 'r', 'utf-8'):
+      qs = ' '.join(tokenizer(orig_qs))
+      # logging.info('Orig Qs: %s'%qs)
+      qs_tokens = [imp_words_map[token] if token in imp_words_map else token for token in qs.split()]
+      qs = ' '.join(qs_tokens).lower()
+      # logging.info('Repl Qs: %s' %qs)
+
       write_data = []
-      write_data.append(' '.join(tokenizer(qs.lower())))
+      write_data.append(orig_qs.strip())
+
+      variations = self.generate_topk_sequences(sentence=qs, unk_tx=True, tokenize=False)
+      variations = self.replace_and_filter_variations(args, variations, rev_imp_words_map)
       write_data.extend(variations)
       var_fw.write(';'.join(write_data) + '\n')
-
       bar.next()
     var_fw.close()
 
@@ -480,17 +513,20 @@ def setup_args():
   parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
   parser.add_argument('-phrase', dest='phrase', default=False, action='store_true')
   parser.add_argument('-entity', dest='entity', default=False, action='store_true')
-  parser.add_argument('-qs_file', dest='qs_file', default=None)
+
   parser.add_argument('-max_unk_symbols', default=8, type=int)
   parser.add_argument('-deep_qa', dest='deep_qa', default=False, action='store_true')
   parser.add_argument('-paralex', dest='paralex', default=False, action='store_true')
   parser.add_argument('-unk_tx', dest='unk_tx', default=False, action='store_true')
-  parser.add_argument('-min_prob', default=0.001, type=float)
   parser.add_argument('-suffix', default=None, help='Eval file suffix')
 
   parser.add_argument('-save_tx', default=False, action='store_true', help='Save tx for model')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
-  parser.add_argument('-variations', default=False, help='Generate question variations')
+
+  parser.add_argument('-variations', default=False, help='Generate question variations', action='store_true')
+  parser.add_argument('-min_prob', default=0.001, type=float)
+  parser.add_argument('-qs_file', dest='qs_file', default=None)
+  parser.add_argument('-imp_words', default='imp_words.txt', help='List of important words')
 
   args = parser.parse_args()
   return args
@@ -503,7 +539,7 @@ def main():
                          entity=args.entity, phrase=args.phrase)
 
   if args.variations:
-    sg.generate_variations(args.qs_file)
+    sg.generate_variations(args)
   elif args.save_tx:
     sg.save_translations(args)
   elif args.bleu:
