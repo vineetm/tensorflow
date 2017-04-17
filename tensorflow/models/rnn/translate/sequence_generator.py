@@ -10,6 +10,8 @@ from commons import execute_bleu_command, get_num_lines
 import numpy as np, argparse
 from progress.bar import Bar
 from symbol_assigner import SymbolAssigner
+from translation_candidate import Candidate
+
 
 ENTITIES = ['PER', 'GEO', 'ORG', 'BLD']
 TRANSLATIONS_FILE = 'translations.pkl'
@@ -181,6 +183,7 @@ class SequenceGenerator(object):
       new_work.append((' '.join(new_tokens), part[1] * curr_prob))
     return new_work[:beam_size]
 
+
   def get_bucket_id(self, token_ids):
     bucket_ids = [b for b in xrange(len(self._buckets))
                   if self._buckets[b][0] > len(token_ids)]
@@ -282,16 +285,6 @@ class SequenceGenerator(object):
     return bleu_scores
 
 
-  def get_nltk_bleu_scores(self, list_hypothesis, references):
-    bleu_scores = []
-
-    references_list = [reference.split() for reference in references]
-    for hyp in list_hypothesis:
-      bleu = nltk.translate.bleu_score.sentence_bleu(references_list, hyp.split())
-      bleu_scores.append(bleu)
-    return bleu_scores
-
-
   def write_bleu_data(self, max_refs, input_sentences, selected_hypothesis, all_references, report_data, suffix=None):
     #Write all references
     ref_file_names = [os.path.join(self.model_path, 'all_ref%d.txt' % index) for index in range(max_refs)]
@@ -365,7 +358,11 @@ class SequenceGenerator(object):
       if index not in translations:
         all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=args.unk_tx, beam_size=args.beam_size,
                                                       tokenize=False, entity=False, phrase=False)
+
+        all_candidates = [Candidate(hyp[0], seq2seq_score=hyp[1], model=args.label) for hyp in all_hypothesis]
         translations[index] = all_hypothesis
+
+      logging.info('Done: %d'%index)
 
     logging.info('Saving tx to %s' % translations_fname)
     with open(translations_fname, 'w') as ftr:
@@ -491,8 +488,9 @@ def setup_args():
   parser.add_argument('-min_prob', default=0.001, type=float)
   parser.add_argument('-suffix', default=None, help='Eval file suffix')
 
-  parser.add_argument('-save_tx', default=False, help='Save tx for model')
+  parser.add_argument('-save_tx', default=False, action='store_true', help='Save tx for model')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
+  parser.add_argument('-variations', default=False, help='Generate question variations')
 
   args = parser.parse_args()
   return args
@@ -504,10 +502,10 @@ def main():
   sg = SequenceGenerator(model_dir=args.model_dir, eval_file=args.eval_file, max_unk_symbols=args.max_unk_symbols,
                          entity=args.entity, phrase=args.phrase)
 
-  if args.save_tx:
-    sg.save_translations(args)
-  elif args.qs_file:
+  if args.variations:
     sg.generate_variations(args.qs_file)
+  elif args.save_tx:
+    sg.save_translations(args)
   elif args.bleu:
     sg.get_corpus_bleu_score(max_refs=args.max_refs, beam_size=args.beam_size, unk_tx=args.unk_tx, progress=args.progress,
                                entity=False, phrase=args.phrase, suffix=args.suffix)
