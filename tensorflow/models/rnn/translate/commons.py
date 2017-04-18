@@ -45,9 +45,15 @@ SCORES_SUFFIX = 'scores.pkl'
 RESULTS_SUFFIX = 'results.pkl'
 
 LM_VOCAB_FILE = 'vocab.pkl'
+TRANSLATIONS_FILE = 'translations.pkl'
+LM_FILE = 'lm.pkl'
 
 import cPickle as pkl
 from nltk.corpus import stopwords
+
+def save_pkl(fname, data):
+  with open(fname, 'w') as fw:
+    pkl.dump(data, fw)
 
 
 def load_pkl(fname):

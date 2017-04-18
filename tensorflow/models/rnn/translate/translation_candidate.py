@@ -7,7 +7,11 @@ class Candidate(object):
     self.model = model
     self.bleu_score = bleu_score
     self.lm_score = NOT_SET
+
     self.final_score = NOT_SET
+
+  def set_model(self, model):
+    self.model = model
 
   '''
   Assign combined score using a linear combination of seq2seq and lm_score

@@ -7,7 +7,7 @@ from data_utils import initialize_vocabulary, sentence_to_token_ids, EOS_ID
 from collections import Counter
 
 from nltk.tokenize import word_tokenize as tokenizer
-from commons import execute_bleu_command, get_num_lines, load_pkl
+from commons import execute_bleu_command, get_num_lines, load_pkl, save_pkl, TRANSLATIONS_FILE
 import numpy as np, argparse
 from progress.bar import Bar
 from symbol_assigner import SymbolAssigner
@@ -15,7 +15,9 @@ from translation_candidate import Candidate
 
 
 ENTITIES = ['PER', 'GEO', 'ORG', 'BLD']
-TRANSLATIONS_FILE = 'translations.pkl'
+
+RECALL_FILE = 'recall.pkl'
+PRECISION_FILE = 'precision.pkl'
 
 logging = tf.logging
 logging.set_verbosity(logging.INFO)
@@ -360,14 +362,100 @@ class SequenceGenerator(object):
 
 
   def compute_average_bleu_scores(self, args):
+    def get_header_data():
+      header_data = []
+      header_data.append('Input Sentence')
+      header_data.append('Avg Precision')
+      header_data.append('Avg Recall')
+
+      header_data.append('Best Precision')
+      header_data.append('Best Recall')
+
+      for ref_num in range(args.max_refs):
+        header_data.append('Ref%d' % ref_num)
+        header_data.append('Bleu')
+
+      for cand_num in range(args.beam_size):
+        header_data.append('C%d' % cand_num)
+        header_data.append('Bleu')
+      return header_data
+
+    all_avg_precision = []
+    all_avg_recall = []
+
+    report_fw = codecs.open(os.path.join(args.model_dir, 'report.txt'), 'w', 'utf-8')
+    report_fw.write('\t'.join(get_header_data()) + '\n')
+    for part_num in range(1, args.workers+1):
+      # eval_file_part = 'eval.data.p1'
+      eval_file_part = '%s.p%d'%(args.eval_file, part_num)
+      eval_lines = codecs.open(eval_file_part, 'r', 'utf-8').readlines()
+
+      translations = load_pkl(os.path.join(args.model_dir, '%s.%s' % (eval_file_part, TRANSLATIONS_FILE)))
+      recall_scores = load_pkl(os.path.join(args.model_dir, '%s.%s' % (eval_file_part, RECALL_FILE)))
+      precision_scores = load_pkl(os.path.join(args.model_dir, '%s.%s' % (eval_file_part, PRECISION_FILE)))
+
+      for part_index in translations:
+        write_data = []
+        #Write input question
+        write_data.append(eval_lines[part_index].split('\t')[0])
+        precision_scores_only = [score[1] for score in precision_scores[part_index]]
+
+        if len(precision_scores_only) == 0:
+          avg_precision = 0.0
+          max_precision = 0.0
+          argmax_precision = 0
+        else:
+          avg_precision = np.average(precision_scores_only)
+          max_precision = np.max(precision_scores_only)
+          argmax_precision = np.argmax(precision_scores_only)
+
+        #Write Average Precision
+        write_data.append('%.2f'%avg_precision)
+        all_avg_precision.append(avg_precision)
+
+        # Write Average Recall
+        recall_scores_only = [score[1] for score in recall_scores[part_index]]
+        avg_recall = np.average(recall_scores_only)
+        write_data.append('%.2f'%avg_recall)
+        all_avg_recall.append(avg_recall)
+
+        #Write best precision and recall
+        write_data.append('%.2f [%d]' % (max_precision, argmax_precision))
+        write_data.append('%.2f [%d]'%(np.max(recall_scores_only), np.argmax(recall_scores_only)))
+
+        for reference, bleu in recall_scores[part_index]:
+          write_data.append(reference)
+          write_data.append('%.2f'%bleu)
+
+        for candidate, bleu in precision_scores[part_index]:
+          write_data.append(candidate)
+          write_data.append('%.2f' % bleu)
+
+        # if len(all_avg_precision) % 100 == 0:
+        logging.info('Index: %d Avg_Pr:%.2f Avg_Re:%.2f'%(len(all_avg_precision), np.average(all_avg_precision),
+                                                          np.average(all_avg_recall)))
+
+        report_fw.write('\t'.join(write_data) + '\n')
+      logging.info('Final Avg_Pr:%.2f Avg_Re:%.2f' %(np.average(all_avg_precision), np.average(all_avg_recall)))
+
+
+  def compute_bleu_scores(self, args):
     translations_fname = os.path.join(args.model_dir, '%s.%s' % (args.eval_file, TRANSLATIONS_FILE))
     translations = load_pkl(translations_fname)
+    if len(translations) > 0:
+      return
+
+    recall_fname = os.path.join(args.model_dir, '%s.%s' % (args.eval_file, RECALL_FILE))
+    precision_fname = os.path.join(args.model_dir, '%s.%s' % (args.eval_file, PRECISION_FILE))
 
     eval_index = 0
+    saved_precision_scores = {}
+    saved_recall_scores = {}
+
     for eval_line in codecs.open(args.eval_file, 'r', 'utf-8'):
       parts = eval_line.split('\t')
       input_sentence = parts[0].strip()
-      references = [part.strip() for part in parts[1:]]
+      references = [part.strip() for part in parts[1:]][:args.max_refs]
 
       if eval_index not in translations:
         all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=args.unk_tx,
@@ -377,20 +465,23 @@ class SequenceGenerator(object):
 
         candidate_sentences = [candidate.text for candidate in all_candidates]
         eval_prefix = os.path.join(args.model_dir, args.eval_file)
-        bleu_scores_precision = [self.compute_bleu_multiple_references(eval_prefix, candidate, references)
+        bleu_scores_precision = [(candidate, self.compute_bleu_multiple_references(eval_prefix, candidate, references))
                                  for candidate in candidate_sentences]
 
-        bleu_scores_recall = [self.compute_bleu_multiple_references(eval_prefix, reference, candidate_sentences)
+        bleu_scores_recall = [(reference, self.compute_bleu_multiple_references(eval_prefix, reference, candidate_sentences))
                                  for reference in references]
+        [candidate.set_bleu_score(bleu_score[1]) for candidate, bleu_score in zip(all_candidates, bleu_scores_precision)]
 
-        logging.info('Index: %d Pr:%s'%(eval_index, bleu_scores_precision))
-        logging.info('Index: %d Re:%s' % (eval_index, bleu_scores_recall))
-
+        translations[eval_index] = all_candidates
+        saved_precision_scores[eval_index] = bleu_scores_precision
+        saved_recall_scores[eval_index] = bleu_scores_recall
         eval_index += 1
+        logging.info('Done: %d'%eval_index)
 
-    logging.info('Saving tx to %s' % translations_fname)
-    with open(translations_fname, 'w') as ftr:
-      pkl.dump(translations, ftr)
+    save_pkl(recall_fname, saved_recall_scores)
+    save_pkl(precision_fname, saved_precision_scores)
+    save_pkl(translations_fname, translations)
+
 
   def get_imp_words_map(self, args):
     imp_words_map = {}
@@ -480,6 +571,10 @@ def setup_args():
   parser.add_argument('-max_refs', dest='max_refs', default=16, type=int, help='Maximum references')
   parser.add_argument('-label', default='base', help='Model label')
 
+  parser.add_argument('-avg', default=False, help='Combine all results to compute avg precision and recall',
+                      action='store_true')
+  parser.add_argument('-workers', default=100, type=int)
+
   #Options for question variation generator
   parser.add_argument('-variations', default=False, help='Generate question variations', action='store_true')
   parser.add_argument('-min_prob', default=0.0001, type=float)
@@ -499,6 +594,8 @@ def main():
   if args.variations:
     sg.generate_variations(args)
   elif args.bleu:
+    sg.compute_bleu_scores(args)
+  elif args.avg:
     sg.compute_average_bleu_scores(args)
 
 if __name__ == '__main__':
