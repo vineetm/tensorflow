@@ -51,6 +51,28 @@ LM_FILE = 'lm.pkl'
 import cPickle as pkl
 from nltk.corpus import stopwords
 
+
+def compute_bleu_multiple_references(file_prefix, hyp, references):
+  if hyp == '' or len(references) == 0:
+    return 0.0
+
+  hyp_file = '%s_%s' % (file_prefix, 'hyp.txt')
+  ref_files = ['%s_%s' % (file_prefix, 'ref%d.txt' % ref) for ref in range(len(references))]
+
+  ref_fws = [codecs.open(fname, 'w', 'utf-8') for fname in ref_files]
+  for index, reference in enumerate(references):
+    ref_fws[index].write(reference.strip() + '\n')
+
+  [ref_fw.close() for ref_fw in ref_fws]
+
+  hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
+  hyp_fw.write(hyp.strip() + '\n')
+  hyp_fw.close()
+
+  bleu = execute_bleu_command(' '.join(ref_files), hyp_file)
+  return bleu
+
+
 def save_pkl(fname, data):
   with open(fname, 'w') as fw:
     pkl.dump(data, fw)

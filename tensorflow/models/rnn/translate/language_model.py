@@ -63,7 +63,7 @@ from nltk.tokenize import word_tokenize as tokenizer
 import argparse, codecs
 logging = tf.logging
 logging.set_verbosity(tf.logging.INFO)
-from commons import execute_bleu_command, get_num_lines, load_pkl, TRANSLATIONS_FILE, LM_FILE, save_pkl
+from commons import execute_bleu_command, get_num_lines, load_pkl, TRANSLATIONS_FILE, LM_FILE, save_pkl, compute_bleu_multiple_references
 from progress.bar import Bar
 from translation_candidate import Candidate
 import ast
@@ -408,15 +408,74 @@ class LanguageModel(object):
         model_candidates = load_pkl(os.path.join(models_config[model], '%s.%s'%(eval_file, TRANSLATIONS_FILE)))
         for index in model_candidates:
           [candidate.set_lm_score(self.compute_prob(candidate.text)) for candidate in model_candidates[index]]
-
         save_pkl(lm_file, model_candidates)
         logging.info('Model:%s Saved %d lm candidates from %s'%(model, len(model_candidates), lm_file))
+
 
       for index in model_candidates:
         if index not in all_candidates:
           all_candidates[index] = []
         all_candidates[index].extend(model_candidates[index])
     return all_candidates
+
+
+  def merge_models_part(self, eval_file, models_config, max_refs, lm_weight, beam_size, report_fw):
+    eval_lines = codecs.open(eval_file).readlines()
+    all_avg_precision = []
+    all_avg_recall = []
+
+    all_candidates = self.get_candidates_all_models(models_config, eval_file)
+    for index, eval_line in enumerate(eval_lines):
+      write_data = []
+      parts = eval_line.split()
+      parts = [part.strip() for part in parts]
+      input_qs = parts[0]
+      references = parts[1:max_refs + 1]
+
+      write_data.append(input_qs)
+
+      # Get Candidates, these have lm_scores set
+      candidates = all_candidates[index]
+      [candidate.set_final_score(lm_weight) for candidate in candidates]
+      sorted_candidates = sorted(candidates, key=lambda t: t.final_score, reverse=True)[:beam_size]
+
+      if len(sorted_candidates) > 0:
+        precision_scores = [candidate.bleu_score for candidate in sorted_candidates]
+      else:
+        precision_scores = [0.0]
+
+      candidate_sentences = [candidate.text for candidate in sorted_candidates]
+      if len(candidate_sentences) > 0:
+        recall_scores =  [(reference, compute_bleu_multiple_references(eval_file, reference, candidate_sentences))
+                                 for reference in references]
+      else:
+        recall_scores = np.zeros(len(references))
+
+      avg_precision = np.average(precision_scores)
+      avg_recall = np.average(recall_scores)
+
+      #Write Average Precision and Recall
+      write_data.append(avg_precision)
+      write_data.append(avg_recall)
+
+      all_avg_precision.append(avg_precision)
+      all_avg_recall.append(avg_recall)
+
+      #Write best precision and recall
+      write_data.append('%.2f [%d]'%(np.max(precision_scores), np.argmax(precision_scores)))
+      write_data.append('%.2f [%d]' % (np.max(recall_scores), np.argmax(recall_scores)))
+
+      for recall_score, reference in zip(recall_scores, references):
+        write_data.append(reference)
+        write_data.append('%.2f'%recall_score)
+
+      for cand_index, candidate in enumerate(candidate_sentences):
+        write_data.append(candidate)
+        write_data.append(candidate.str_scores())
+
+      report_fw.write('\t'.join(write_data) + '\n')
+    return all_avg_precision, all_avg_recall
+
 
   def merge_models(self, args):
     def read_models_config(config_file):
@@ -428,30 +487,41 @@ class LanguageModel(object):
           models_config[parts[0]] = parts[1]
       return models_config
 
+    def get_header_data():
+      header_data = []
+      header_data.append('Input Sentence')
+      header_data.append('Avg Precision')
+      header_data.append('Avg Recall')
+
+      header_data.append('Best Precision')
+      header_data.append('Best Recall')
+
+      for ref_num in range(args.max_refs):
+        header_data.append('Ref%d' % ref_num)
+        header_data.append('Bleu')
+
+      for cand_num in range(args.beam_size):
+        header_data.append('C%d' % cand_num)
+        header_data.append('Scores')
+      return header_data
+
     models_config = read_models_config(args.models_config)
     logging.info('Models: %s[%d]'%(models_config, len(models_config)))
 
     all_avg_precision = []
     all_avg_recall = []
 
+    report_fw = codecs.open(args.report)
+    report_fw.write('\t'.join(get_header_data()) + '\n')
+
     for part_num in range(1, args.workers+1):
       eval_file = '%s.p%d'%(args.eval_file, part_num)
-      eval_lines = codecs.open(eval_file).readlines()
-
-      all_candidates = self.get_candidates_all_models(models_config, eval_file)
-      for index, eval_line in enumerate(eval_lines):
-        parts = eval_line.split()
-        parts = [part.strip() for part in parts]
-        input_qs = parts[0]
-        references = parts[1:args.max_refs+1]
-
-        #Get Candidates, these have lm_scores set
-        candidates = all_candidates[index]
-        [candidate.set_final_score(args.lm_weight) for candidate in candidates]
-        sorted_candidates = sorted(candidates, key=lambda t:t.final_score, reverse=True)[:args.beam_size]
-        precision_scores = [candidate.bleu_score for candidate in sorted_candidates]
-        all_avg_precision.append(np.average(precision_scores))
-        logging.info('Part:%d Index: %d Pr:%.2f'%(part_num, index, np.average(all_avg_precision)))
+      part_precision, part_recall = self.merge_models_part(eval_file, models_config, max_refs=args.max_refs,
+                                                           lm_weight=args.lm_weight, beam_size=args.beam_size,
+                                                           report_fw = report_fw)
+      all_avg_precision.extend(part_precision)
+      all_avg_recall.extend(part_recall)
+    logging.info('Avg Pr: %.2f'%(np.average(all_avg_precision)))
 
 DEF_MODEL_DIR='trained-models/lm'
 
@@ -472,6 +542,7 @@ def setup_args():
   parser.add_argument('-eval_file', default='eval.data')
   parser.add_argument('-lm_weight', default=0.0, type=float)
   parser.add_argument('-workers', default=100, type=int)
+  parser.add_argument('-report', default='report.txt')
   args = parser.parse_args()
   return args
 

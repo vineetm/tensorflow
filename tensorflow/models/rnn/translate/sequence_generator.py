@@ -7,7 +7,7 @@ from data_utils import initialize_vocabulary, sentence_to_token_ids, EOS_ID
 from collections import Counter
 
 from nltk.tokenize import word_tokenize as tokenizer
-from commons import execute_bleu_command, get_num_lines, load_pkl, save_pkl, TRANSLATIONS_FILE
+from commons import execute_bleu_command, get_num_lines, load_pkl, save_pkl, compute_bleu_multiple_references, TRANSLATIONS_FILE
 import numpy as np, argparse
 from progress.bar import Bar
 from symbol_assigner import SymbolAssigner
@@ -340,25 +340,6 @@ class SequenceGenerator(object):
     fr.close()
     return lines
 
-  def compute_bleu_multiple_references(self, file_prefix, hyp, references):
-    if hyp == '' or len(references) == 0:
-      return 0.0
-
-    hyp_file = '%s_%s'%(file_prefix, 'hyp.txt')
-    ref_files = ['%s_%s'%(file_prefix, 'ref%d.txt'%ref) for ref in range(len(references))]
-
-    ref_fws = [codecs.open(fname, 'w', 'utf-8') for fname in ref_files]
-    for index, reference in enumerate(references):
-      ref_fws[index].write(reference.strip() + '\n')
-
-    [ref_fw.close() for ref_fw in ref_fws]
-
-    hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
-    hyp_fw.write(hyp.strip() + '\n')
-    hyp_fw.close()
-
-    bleu = execute_bleu_command(' '.join(ref_files), hyp_file)
-    return bleu
 
 
   def compute_average_bleu_scores(self, args):
@@ -465,10 +446,10 @@ class SequenceGenerator(object):
 
         candidate_sentences = [candidate.text for candidate in all_candidates]
         eval_prefix = os.path.join(args.model_dir, args.eval_file)
-        bleu_scores_precision = [(candidate, self.compute_bleu_multiple_references(eval_prefix, candidate, references))
+        bleu_scores_precision = [(candidate, compute_bleu_multiple_references(eval_prefix, candidate, references))
                                  for candidate in candidate_sentences]
 
-        bleu_scores_recall = [(reference, self.compute_bleu_multiple_references(eval_prefix, reference, candidate_sentences))
+        bleu_scores_recall = [(reference, compute_bleu_multiple_references(eval_prefix, reference, candidate_sentences))
                                  for reference in references]
         [candidate.set_bleu_score(bleu_score[1]) for candidate, bleu_score in zip(all_candidates, bleu_scores_precision)]
 
