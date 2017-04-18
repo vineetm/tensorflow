@@ -471,6 +471,7 @@ class LanguageModel(object):
 
       for cand_index, candidate in enumerate(candidate_sentences):
         write_data.append(candidate)
+        write_data.append(candidate.model)
         write_data.append(candidate.str_scores())
 
       report_fw.write('\t'.join(write_data) + '\n')
@@ -502,6 +503,7 @@ class LanguageModel(object):
 
       for cand_num in range(args.beam_size):
         header_data.append('C%d' % cand_num)
+        header_data.append('Model')
         header_data.append('Scores')
       return header_data
 
