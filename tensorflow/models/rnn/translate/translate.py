@@ -75,6 +75,8 @@ tf.app.flags.DEFINE_boolean("self_test", False,
                             "Run a self-test if this is set to True.")
 tf.app.flags.DEFINE_boolean("use_fp16", False,
                             "Train using fp16 instead of fp32.")
+tf.app.flags.DEFINE_integer("patience", 1000,
+                            "Limit on the size of training data (0: no limit).")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -317,8 +319,10 @@ def train():
 
         else:
           num_dev_unchanged += 1
-          if num_dev_unchanged >= 100:
-            tf.logging.info('Early EXIT, dev unchanged:%d'%num_dev_unchanged)
+          if num_dev_unchanged % 50 == 0:
+            tf.logging.info('Early EXIT dev unchanged: %d' % num_dev_unchanged)
+          if num_dev_unchanged >= FLAGS.patience:
+            tf.logging.info('Early EXIT final, dev unchanged:%d '%num_dev_unchanged)
             return
 
         step_time, loss = 0.0, 0.0
