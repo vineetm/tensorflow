@@ -56,20 +56,23 @@ def compute_bleu_multiple_references(file_prefix, hyp, references):
   if hyp == '' or len(references) == 0:
     return 0.0
 
-  hyp_file = '%s_%s' % (file_prefix, 'hyp.txt')
-  ref_files = ['%s_%s' % (file_prefix, 'ref%d.txt' % ref) for ref in range(len(references))]
+  try:
+    hyp_file = '%s_%s' % (file_prefix, 'hyp.txt')
+    ref_files = ['%s_%s' % (file_prefix, 'ref%d.txt' % ref) for ref in range(len(references))]
 
-  ref_fws = [codecs.open(fname, 'w', 'utf-8') for fname in ref_files]
-  for index, reference in enumerate(references):
-    ref_fws[index].write(reference.strip() + '\n')
+    ref_fws = [codecs.open(fname, 'w', 'utf-8') for fname in ref_files]
+    for index, reference in enumerate(references):
+      ref_fws[index].write(reference.strip() + '\n')
 
-  [ref_fw.close() for ref_fw in ref_fws]
+    [ref_fw.close() for ref_fw in ref_fws]
 
-  hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
-  hyp_fw.write(hyp.strip() + '\n')
-  hyp_fw.close()
+    hyp_fw = codecs.open(hyp_file, 'w', 'utf-8')
+    hyp_fw.write(hyp.strip() + '\n')
+    hyp_fw.close()
 
-  bleu = execute_bleu_command(' '.join(ref_files), hyp_file)
+    bleu = execute_bleu_command(' '.join(ref_files), hyp_file)
+  except UnicodeDecodeError:
+    bleu = 0.0
   return bleu
 
 
@@ -83,7 +86,7 @@ def load_pkl(fname):
   if os.path.exists(fname):
     with open(fname) as fr:
       data = pkl.load(fr)
-      logging.info('%s: Found %d stored data_items'%(fname, len(data)))
+      # logging.info('%s: Found %d stored data_items'%(fname, len(data)))
   return data
 
 

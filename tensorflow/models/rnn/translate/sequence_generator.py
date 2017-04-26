@@ -347,14 +347,14 @@ class SequenceGenerator(object):
       header_data = []
       header_data.append('Input Sentence')
       header_data.append('Avg Precision')
-      header_data.append('Avg Recall')
+      # header_data.append('Avg Recall')
 
       header_data.append('Best Precision')
-      header_data.append('Best Recall')
+      # header_data.append('Best Recall')
 
-      for ref_num in range(args.max_refs):
-        header_data.append('Ref%d' % ref_num)
-        header_data.append('Bleu')
+      # for ref_num in range(args.max_refs):
+      #   header_data.append('Ref%d' % ref_num)
+      #   header_data.append('Bleu')
 
       for cand_num in range(args.beam_size):
         header_data.append('C%d' % cand_num)
@@ -372,14 +372,14 @@ class SequenceGenerator(object):
       eval_lines = codecs.open(eval_file_part, 'r', 'utf-8').readlines()
 
       translations = load_pkl(os.path.join(args.model_dir, '%s.%s' % (eval_file_part, TRANSLATIONS_FILE)))
-      recall_scores = load_pkl(os.path.join(args.model_dir, '%s.%s' % (eval_file_part, RECALL_FILE)))
+      # recall_scores = load_pkl(os.path.join(args.model_dir, '%s.%s' % (eval_file_part, RECALL_FILE)))
       precision_scores = load_pkl(os.path.join(args.model_dir, '%s.%s' % (eval_file_part, PRECISION_FILE)))
 
       for part_index in translations:
         write_data = []
         #Write input question
         write_data.append(eval_lines[part_index].split('\t')[0])
-        precision_scores_only = [score[1] for score in precision_scores[part_index]]
+        precision_scores_only = [score[1] for score in precision_scores[part_index][:args.beam_size]]
 
         if len(precision_scores_only) == 0:
           avg_precision = 0.0
@@ -395,29 +395,28 @@ class SequenceGenerator(object):
         all_avg_precision.append(avg_precision)
 
         # Write Average Recall
-        recall_scores_only = [score[1] for score in recall_scores[part_index]]
-        avg_recall = np.average(recall_scores_only)
-        write_data.append('%.2f'%avg_recall)
-        all_avg_recall.append(avg_recall)
+        # recall_scores_only = [score[1] for score in recall_scores[part_index]]
+        # avg_recall = np.average(recall_scores_only)
+        # write_data.append('%.2f'%avg_recall)
+        # all_avg_recall.append(avg_recall)
 
         #Write best precision and recall
         write_data.append('%.2f [%d]' % (max_precision, argmax_precision))
-        write_data.append('%.2f [%d]'%(np.max(recall_scores_only), np.argmax(recall_scores_only)))
+        # write_data.append('%.2f [%d]'%(np.max(recall_scores_only), np.argmax(recall_scores_only)))
 
-        for reference, bleu in recall_scores[part_index]:
-          write_data.append(reference)
-          write_data.append('%.2f'%bleu)
+        # for reference, bleu in recall_scores[part_index]:
+        #   write_data.append(reference)
+        #   write_data.append('%.2f'%bleu)
 
         for candidate, bleu in precision_scores[part_index]:
           write_data.append(candidate)
           write_data.append('%.2f' % bleu)
 
         # if len(all_avg_precision) % 100 == 0:
-        logging.info('Index: %d Avg_Pr:%.2f Avg_Re:%.2f'%(len(all_avg_precision), np.average(all_avg_precision),
-                                                          np.average(all_avg_recall)))
+        logging.info('Index: %d Avg_Pr:%.2f '%(len(all_avg_precision), np.average(all_avg_precision)))
 
         report_fw.write('\t'.join(write_data) + '\n')
-      logging.info('Final Avg_Pr:%.2f Avg_Re:%.2f' %(np.average(all_avg_precision), np.average(all_avg_recall)))
+      logging.info('Final Avg_Pr:%.2f' %(np.average(all_avg_precision)))
 
 
   def compute_bleu_scores(self, args):
@@ -426,12 +425,12 @@ class SequenceGenerator(object):
     if len(translations) > 0:
       return
 
-    recall_fname = os.path.join(args.model_dir, '%s.%s' % (args.eval_file, RECALL_FILE))
+    # recall_fname = os.path.join(args.model_dir, '%s.%s' % (args.eval_file, RECALL_FILE))
     precision_fname = os.path.join(args.model_dir, '%s.%s' % (args.eval_file, PRECISION_FILE))
 
     eval_index = 0
     saved_precision_scores = {}
-    saved_recall_scores = {}
+    # saved_recall_scores = {}
 
     for eval_line in codecs.open(args.eval_file, 'r', 'utf-8'):
       parts = eval_line.split('\t')
@@ -449,17 +448,17 @@ class SequenceGenerator(object):
         bleu_scores_precision = [(candidate, compute_bleu_multiple_references(eval_prefix, candidate, references))
                                  for candidate in candidate_sentences]
 
-        bleu_scores_recall = [(reference, compute_bleu_multiple_references(eval_prefix, reference, candidate_sentences))
-                                 for reference in references]
+        # bleu_scores_recall = [(reference, compute_bleu_multiple_references(eval_prefix, reference, candidate_sentences))
+        #                          for reference in references]
         [candidate.set_bleu_score(bleu_score[1]) for candidate, bleu_score in zip(all_candidates, bleu_scores_precision)]
 
         translations[eval_index] = all_candidates
         saved_precision_scores[eval_index] = bleu_scores_precision
-        saved_recall_scores[eval_index] = bleu_scores_recall
+        # saved_recall_scores[eval_index] = bleu_scores_recall
         eval_index += 1
         logging.info('Done: %d'%eval_index)
 
-    save_pkl(recall_fname, saved_recall_scores)
+    # save_pkl(recall_fname, saved_recall_scores)
     save_pkl(precision_fname, saved_precision_scores)
     save_pkl(translations_fname, translations)
 
@@ -549,7 +548,7 @@ def setup_args():
   parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
   parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='wa.eval')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
-  parser.add_argument('-max_refs', dest='max_refs', default=16, type=int, help='Maximum references')
+  parser.add_argument('-max_refs', dest='max_refs', default=100, type=int, help='Maximum references')
   parser.add_argument('-label', default='base', help='Model label')
 
   parser.add_argument('-avg', default=False, help='Combine all results to compute avg precision and recall',

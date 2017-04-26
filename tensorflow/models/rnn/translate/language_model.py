@@ -398,18 +398,20 @@ class LanguageModel(object):
   def get_candidates_all_models(self, models_config, eval_file):
     all_candidates = {}
     for model in models_config:
+      if model[-2:] == 'cw':
+        continue
       lm_file = os.path.join(models_config[model], '%s.%s'%(eval_file, LM_FILE))
       if os.path.exists(lm_file):
         model_candidates = load_pkl(lm_file)
         for index in model_candidates:
           [candidate.set_model(model) for candidate in model_candidates[index]]
-        logging.info('Model:%s Loaded %d lm candidates from %s'%(model, len(model_candidates), lm_file))
+        # logging.info('Model:%s Loaded %d lm candidates from %s'%(model, len(model_candidates), lm_file))
       else:
         model_candidates = load_pkl(os.path.join(models_config[model], '%s.%s'%(eval_file, TRANSLATIONS_FILE)))
         for index in model_candidates:
           [candidate.set_lm_score(self.compute_prob(candidate.text)) for candidate in model_candidates[index]]
         save_pkl(lm_file, model_candidates)
-        logging.info('Model:%s Saved %d lm candidates from %s'%(model, len(model_candidates), lm_file))
+        # logging.info('Model:%s Saved %d lm candidates from %s'%(model, len(model_candidates), lm_file))
 
 
       for index in model_candidates:
@@ -419,7 +421,22 @@ class LanguageModel(object):
     return all_candidates
 
 
-  def merge_models_part(self, eval_file, models_config, max_refs, lm_weight, beam_size, report_fw):
+  def merge_models_part(self, eval_file, models_config, max_refs, lm_weight, beam_size, report_fw, eval_dir, debug):
+    def remove_cluster_candidates(candidates, input_sentence):
+      input_set = set(input_sentence.split())
+      final_candidates = []
+      for candidate in candidates:
+        model_name = candidate.model
+
+        if model_name[:2] == 'cl':
+          common_tokens = input_set.intersection(models_config['%s_cw' % model_name])
+          if len(common_tokens) > 0:
+            final_candidates.append(candidate)
+        else:
+          final_candidates.append(candidate)
+      return final_candidates
+
+
     eval_lines = codecs.open(eval_file).readlines()
     all_avg_precision = []
     all_avg_recall = []
@@ -427,7 +444,7 @@ class LanguageModel(object):
     all_candidates = self.get_candidates_all_models(models_config, eval_file)
     for index, eval_line in enumerate(eval_lines):
       write_data = []
-      parts = eval_line.split()
+      parts = eval_line.split('\t')
       parts = [part.strip() for part in parts]
       input_qs = parts[0]
       references = parts[1:max_refs + 1]
@@ -436,8 +453,16 @@ class LanguageModel(object):
 
       # Get Candidates, these have lm_scores set
       candidates = all_candidates[index]
+      old_candidates_len = len(candidates)
+      #Remove candidates from clusters which don't share any word in input sentence
+      candidates = remove_cluster_candidates(candidates, input_qs)
+      logging.info('Index: %d Old:%d New:%d'%(index, old_candidates_len, len(candidates)))
+
       [candidate.set_final_score(lm_weight) for candidate in candidates]
-      sorted_candidates = sorted(candidates, key=lambda t: t.final_score, reverse=True)[:beam_size]
+      if debug:
+        sorted_candidates = sorted(candidates, key=lambda t: t.bleu_score, reverse=True)[:beam_size]
+      else:
+        sorted_candidates = sorted(candidates, key=lambda t: t.final_score, reverse=True)[:beam_size]
 
       if len(sorted_candidates) > 0:
         precision_scores = [candidate.bleu_score for candidate in sorted_candidates]
@@ -446,7 +471,8 @@ class LanguageModel(object):
 
       candidate_sentences = [candidate.text for candidate in sorted_candidates]
       if len(candidate_sentences) > 0:
-        recall_scores =  [(reference, compute_bleu_multiple_references(eval_file, reference, candidate_sentences))
+        recall_scores =  [compute_bleu_multiple_references(os.path.join(eval_dir, eval_file),
+                                                           reference, candidate_sentences)
                                  for reference in references]
       else:
         recall_scores = np.zeros(len(references))
@@ -455,8 +481,8 @@ class LanguageModel(object):
       avg_recall = np.average(recall_scores)
 
       #Write Average Precision and Recall
-      write_data.append(avg_precision)
-      write_data.append(avg_recall)
+      write_data.append('%.2f'%avg_precision)
+      write_data.append('%.2f'%avg_recall)
 
       all_avg_precision.append(avg_precision)
       all_avg_recall.append(avg_recall)
@@ -465,28 +491,49 @@ class LanguageModel(object):
       write_data.append('%.2f [%d]'%(np.max(precision_scores), np.argmax(precision_scores)))
       write_data.append('%.2f [%d]' % (np.max(recall_scores), np.argmax(recall_scores)))
 
+      rem_references = max_refs - len(references)
       for recall_score, reference in zip(recall_scores, references):
         write_data.append(reference)
         write_data.append('%.2f'%recall_score)
 
+      for index in range(rem_references):
+        write_data.append('')
+        write_data.append('')
+
       for cand_index, candidate in enumerate(candidate_sentences):
         write_data.append(candidate)
-        write_data.append(candidate.model)
-        write_data.append(candidate.str_scores())
+        write_data.append(sorted_candidates[cand_index].model)
+        write_data.append(sorted_candidates[cand_index].str_scores())
 
-      report_fw.write('\t'.join(write_data) + '\n')
+      try:
+        report_fw.write('\t'.join(write_data) + '\n')
+      except UnicodeDecodeError:
+        continue
     return all_avg_precision, all_avg_recall
 
 
   def merge_models(self, args):
+    def read_cluster_words(base_dir):
+      cluster_words = set()
+      cwfile = os.path.join(base_dir, 'cw.txt')
+      for line in codecs.open(cwfile, 'r', 'utf-8'):
+        cluster_words.add(line.strip())
+      return cluster_words
+
     def read_models_config(config_file):
       models_config = {}
       with codecs.open(config_file, 'r', 'utf-8') as fr:
         for line in fr:
           parts = line.split(';')
           parts = [part.strip() for part in parts]
-          models_config[parts[0]] = parts[1]
+          model_name = parts[0]
+          model_dir = parts[1]
+          models_config[model_name] = model_dir
+          if model_name[:2] == 'cl':
+            models_config['%s_cw'%(model_name)] = read_cluster_words(model_dir)
+            logging.info('Model: %s Cw: %d'%(model_name, len(models_config['%s_cw'%(model_name)])))
       return models_config
+
 
     def get_header_data():
       header_data = []
@@ -513,17 +560,18 @@ class LanguageModel(object):
     all_avg_precision = []
     all_avg_recall = []
 
-    report_fw = codecs.open(args.report)
+    report_fw = codecs.open(os.path.join(args.eval_dir, args.report), 'w', 'utf-8')
     report_fw.write('\t'.join(get_header_data()) + '\n')
 
     for part_num in range(1, args.workers+1):
       eval_file = '%s.p%d'%(args.eval_file, part_num)
       part_precision, part_recall = self.merge_models_part(eval_file, models_config, max_refs=args.max_refs,
                                                            lm_weight=args.lm_weight, beam_size=args.beam_size,
-                                                           report_fw = report_fw)
+                                                           report_fw = report_fw, eval_dir=args.eval_dir,
+                                                           debug=args.debug)
       all_avg_precision.extend(part_precision)
       all_avg_recall.extend(part_recall)
-    logging.info('Avg Pr: %.2f'%(np.average(all_avg_precision)))
+    logging.info('Avg Pr: %.2f Re: %.2f'%(np.average(all_avg_precision), np.average(all_avg_recall)))
 
 DEF_MODEL_DIR='trained-models/lm'
 
@@ -545,6 +593,9 @@ def setup_args():
   parser.add_argument('-lm_weight', default=0.0, type=float)
   parser.add_argument('-workers', default=100, type=int)
   parser.add_argument('-report', default='report.txt')
+  parser.add_argument('-eval_dir', default=None)
+  parser.add_argument('-debug', help='Debug mode, select candidates with best BLEU scores!',
+                      action='store_true', default=False)
   args = parser.parse_args()
   return args
 
