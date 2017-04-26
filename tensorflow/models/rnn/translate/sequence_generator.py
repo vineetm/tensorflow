@@ -435,7 +435,7 @@ class SequenceGenerator(object):
     for eval_line in codecs.open(args.eval_file, 'r', 'utf-8'):
       parts = eval_line.split('\t')
       input_sentence = parts[0].strip()
-      references = [part.strip() for part in parts[1:]][:args.max_refs]
+      references = [part.strip() for part in parts[1:]]
 
       if eval_index not in translations:
         all_hypothesis = self.generate_topk_sequences(input_sentence, unk_tx=args.unk_tx,
@@ -548,7 +548,6 @@ def setup_args():
   parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
   parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='wa.eval')
   parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
-  parser.add_argument('-max_refs', dest='max_refs', default=100, type=int, help='Maximum references')
   parser.add_argument('-label', default='base', help='Model label')
 
   parser.add_argument('-avg', default=False, help='Combine all results to compute avg precision and recall',
