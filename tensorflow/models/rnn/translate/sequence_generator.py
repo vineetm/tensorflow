@@ -1,5 +1,5 @@
 from commons import CONFIG_FILE, STOPW_FILE, EVAL_DATA
-import os, logging, codecs, time, nltk
+import os, logging, codecs
 import tensorflow as tf
 import cPickle as pkl
 from seq2seq_model import Seq2SeqModel
@@ -14,8 +14,6 @@ from symbol_assigner import SymbolAssigner
 from translation_candidate import Candidate
 
 
-ENTITIES = ['PER', 'GEO', 'ORG', 'BLD']
-
 RECALL_FILE = 'recall.pkl'
 PRECISION_FILE = 'precision.pkl'
 
@@ -25,14 +23,13 @@ logging.set_verbosity(logging.INFO)
 DEF_MODEL_DIR = 'trained-models/seq2seq'
 
 class SequenceGenerator(object):
-  def __init__(self, model_dir=DEF_MODEL_DIR, max_unk_symbols=8, entity=False, phrase=False):
-
+  def __init__(self, model_dir=DEF_MODEL_DIR):
     config_file_path = os.path.join(model_dir, CONFIG_FILE)
     logging.set_verbosity(logging.INFO)
 
     logging.info('Loading Pre-trained seq2model:%s' % config_file_path)
     config = pkl.load(open(config_file_path))
-    logging.info(config)
+    logging.info('Config: %s'%config)
 
     #Create session
     self.session = tf.Session()
@@ -43,7 +40,6 @@ class SequenceGenerator(object):
     self.src_vocab_size = config['src_vocab_size']
     self.target_vocab_size = config['target_vocab_size']
     self._buckets = config['_buckets']
-    self.max_unk_symbols = max_unk_symbols
 
     compute_prob = True
 
@@ -81,10 +77,8 @@ class SequenceGenerator(object):
     self.fr_vocab, self.rev_fr_vocab = initialize_vocabulary(fr_vocab_path)
 
     stopw_file = os.path.join(self.data_path,  STOPW_FILE)
-    if entity or phrase:
-      self.sa = SymbolAssigner(stopw_file, entity_mapping_file='entity-map.pkl', valid_entity_list=ENTITIES)
-    else:
-      self.sa = SymbolAssigner(stopw_file, valid_entity_list=None, entity_mapping_file=None)
+    self.sa = SymbolAssigner(stopw_file)
+
 
   def generate_output_sequence(self, sentence, unk_tx=True):
     sentence = sentence.lower()
@@ -340,8 +334,6 @@ class SequenceGenerator(object):
     fr.close()
     return lines
 
-
-
   def compute_average_bleu_scores(self, args):
     def get_header_data():
       header_data = []
@@ -568,7 +560,7 @@ def setup_args():
 def main():
   args = setup_args()
   logging.info(args)
-  sg = SequenceGenerator(model_dir=args.model_dir, max_unk_symbols=args.max_unk_symbols)
+  sg = SequenceGenerator(model_dir=args.model_dir)
 
   if args.variations:
     sg.generate_variations(args)
