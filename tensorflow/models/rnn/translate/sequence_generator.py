@@ -211,10 +211,6 @@ class SequenceGenerator(object):
     else:
       unk_sentence = sentence
 
-    if unk_map is not None and len(unk_map) > self.max_unk_symbols:
-      # logging.warn('Skipping Unk_symbols:%d Max:%d'%(len(unk_map), self.max_unk_symbols))
-      return []
-
     token_ids = sentence_to_token_ids(tf.compat.as_bytes(unk_sentence), self.en_vocab, normalize_digits=False)
     bucket_id = self.get_bucket_id(token_ids)
 
@@ -534,13 +530,14 @@ class SequenceGenerator(object):
 def setup_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('-model_dir', help='Trained Seq2Seq Model Directory', default=DEF_MODEL_DIR)
-  parser.add_argument('-max_unk_symbols', default=8, type=int)
-  parser.add_argument('-unk_tx', dest='unk_tx', default=False, action='store_true')
+  parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
+
+
+  parser.add_argument('-no_unk_tx', dest='no_unk_tx', default=False, action='store_true')
+
 
   parser.add_argument('-bleu', dest='bleu', default=False, action='store_true')
-  parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default='wa.eval')
-  parser.add_argument('-beam_size', dest='beam_size', default=16, type=int, help='Beam Search size')
-  parser.add_argument('-label', default='base', help='Model label')
+  parser.add_argument('-eval_file', dest='eval_file', help='Source and References file', default=None)
 
   parser.add_argument('-avg', default=False, help='Combine all results to compute avg precision and recall',
                       action='store_true')
