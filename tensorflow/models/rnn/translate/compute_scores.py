@@ -6,8 +6,9 @@ Generate candidates using beam_search from seq2seq model, and compute LM scores.
 
 '''
 import tensorflow as tf
-import argparse, codecs, os, commands, tempfile, shutil, re
+import argparse, codecs, os, commands, tempfile, re
 import cPickle as pkl
+import numpy as np
 from sequence_generator import SequenceGenerator
 from language_model import LanguageModel
 
@@ -74,7 +75,9 @@ class EvalDatum(object):
 
   def compute_bleu_score(self, hyp, references):
     def cleanup_files(file_names):
-      [shutil.rmtree(file_name) for file_name in file_names]
+      for file_name in file_names:
+        rm_cmd = 'rm -f %s'%file_name
+        execute_shell_command(rm_cmd)
 
     file_names = []
     try:
@@ -126,7 +129,7 @@ def setup_args():
   parser.add_argument('-proj', default='test', help='project name')
 
 
-  parser.add_argument('-avg', default=False, help='Summarize results', action='store_true')
+  parser.add_argument('-report', default=False, help='Summarize results', action='store_true')
   parser.add_argument('-beam_size', default=16, type=int)
   args = parser.parse_args()
   return args
@@ -175,15 +178,15 @@ def generate_candidates_and_compute_scores(model_dir, eval_dir, eval_file):
     with open(saved_candidates_file, 'w') as fw:
       pkl.dump(all_candidates, fw)
 
+def read_num_parts(eval_dir):
+  fr = codecs.open(os.path.join(eval_dir, NUM_PARTS_FILE), 'r', 'utf-8')
+  num_parts = int(fr.read())
+  fr.close()
+  return num_parts
+
 
 def submit_compute_jobs(model_dir, eval_dir, mem, q, proj):
-  def read_num_parts():
-    fr = codecs.open(os.path.join(eval_dir, NUM_PARTS_FILE), 'r', 'utf-8')
-    num_parts = int(fr.read())
-    fr.close()
-    return num_parts
-
-  num_parts = read_num_parts()
+  num_parts = read_num_parts(eval_dir)
   logging.info('Num_parts: %d'%num_parts)
   mkdir_cmd = 'mkdir -p %s' % (os.path.join(model_dir, eval_dir))
   execute_shell_command(mkdir_cmd)
@@ -200,6 +203,61 @@ def submit_compute_jobs(model_dir, eval_dir, mem, q, proj):
     execute_shell_command(jbsub_cmd)
 
 
+def generate_report(model_dir, eval_dir, beam_size):
+  def get_header_data():
+    header_data = []
+    header_data.append('Input Qs')
+
+    header_data.append('Avg Precision')
+
+    for cand_num in range(beam_size):
+      header_data.append('Cand%d'%cand_num)
+      header_data.append('Score')
+
+    header_data.append('References')
+    return header_data
+
+  num_parts = read_num_parts(eval_dir)
+  logging.info('num_parts: %d'%num_parts)
+  avg_bleu_scores = []
+  report_fw = codecs.open(os.path.join(model_dir, eval_dir, 'report_%d.txt'%(beam_size)), 'w', 'utf-8')
+
+  report_fw.write('\t'.join(get_header_data()) + '\n')
+  for part in range(num_parts):
+    eval_file = PARTS_FORMAT%part
+    saved_candidates_file = os.path.join(model_dir, eval_dir, '%s.%s' % (eval_file, SAVED_EVAL_FILE))
+    if not os.path.exists(saved_candidates_file):
+      logging.error('Part %d not found at %s'%(part, saved_candidates_file))
+      return -99.0
+    eval_data = pkl.load(open(saved_candidates_file))
+
+    for eval_datum in eval_data:
+      report_part_data = []
+      report_part_data.append(eval_datum.input_sentence)
+
+      #Only consider candidates upto beam_size
+      candidates = eval_datum.candidates[:beam_size]
+      if len(candidates) > 0:
+        avg_precision = np.average([candidate.bleu for candidate in candidates])
+      else:
+        avg_precision = 0.0
+      avg_bleu_scores.append(avg_precision)
+
+      report_part_data.append('%.4f'%avg_precision)
+      for candidate in candidates:
+        report_part_data.append(candidate.text)
+        report_part_data.append(candidate.score_str())
+
+      for _ in range(len(candidates), beam_size):
+        report_part_data.append('')
+        report_part_data.append('')
+
+      [report_part_data.append(reference) for reference in eval_datum.references]
+      report_fw.write('\t'.join(report_part_data) + '\n')
+  avg_bleu_score = np.average(avg_bleu_scores)
+  return avg_bleu_score
+
+
 def main():
   args = setup_args()
   logging.info(args)
@@ -208,8 +266,10 @@ def main():
     submit_compute_jobs(args.seq2seq_model_dir, args.eval_dir, args.mem, args.q, args.proj)
   elif args.compute:
     generate_candidates_and_compute_scores(args.seq2seq_model_dir, args.eval_dir, args.eval_file)
-
-
+  elif args.report:
+    avg_precision = generate_report(args.seq2seq_model_dir, args.eval_dir, args.beam_size)
+    logging.info('Model: %s Eval: %s Avg_Pr:%.4f [Beam_Size: %d]'
+                 %(args.seq2seq_model_dir, args.eval_dir, avg_precision, args.beam_size))
 
 
 if __name__ == '__main__':
