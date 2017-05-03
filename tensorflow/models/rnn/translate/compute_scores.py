@@ -15,6 +15,7 @@ from language_model import LanguageModel
 logging = tf.logging
 logging.set_verbosity(logging.INFO)
 
+BASE_MODEL = 'base'
 SAVED_EVAL_FILE = 'eval.pkl'
 NUM_PARTS_FILE = 'num_parts.txt'
 PARTS_FORMAT = 'p%d.txt'
@@ -50,18 +51,29 @@ class Candidate(object):
     self.lm_score = NOT_SET
     self.final_score = NOT_SET
 
+
+  def set_label(self, label):
+    self.label = label
+
+
   def set_lm_score(self, lm_score):
     self.lm_score = lm_score
 
+  def set_seq2seq_score(self, seq2seq_score):
+    self.seq2seq_score = seq2seq_score
+
   def set_bleu_score(self, bleu):
     self.bleu = bleu
+
+  def set_final_score(self, lm_wt):
+    self.final_score = (lm_wt * self.lm_score) + ((1.0 - lm_wt) * self.seq2seq_score)
 
   def score_str(self):
     return 'Final: %s[Seq: %.4f Lm_Score: %.4f] Bleu: %.4f '\
            %(self.final_score, self.seq2seq_score, self.lm_score, self.bleu)
 
   def __str__(self):
-    return '%s %s'%(self.text, self.score_str())
+    return '[%s]%s %s'%(self.label, self.text, self.score_str())
 
 
 class EvalDatum(object):
@@ -125,12 +137,18 @@ def setup_args():
   parser.add_argument('-eval_file', help='Single eval file', default=None)
   parser.add_argument('-seq2seq_model_dir', default=None)
   parser.add_argument('-mem', default='16g', help='Reserved mem for jobs')
-  parser.add_argument('-q', default='x86_1h', help='Job q')
+  parser.add_argument('-q', default='x86_6h', help='Job q')
   parser.add_argument('-proj', default='test', help='project name')
 
 
   parser.add_argument('-report', default=False, help='Summarize results', action='store_true')
   parser.add_argument('-beam_size', default=16, type=int)
+
+  parser.add_argument('-combine', default=False, help='Summarize results', action='store_true')
+  parser.add_argument('-lm_wt', default=0.0, type=float, help='lm_weight')
+  parser.add_argument('-models_file', default=None, help='Single file with all model paths')
+  parser.add_argument('-report_file', default=None, help='Combination Report')
+
   args = parser.parse_args()
   return args
 
@@ -209,6 +227,7 @@ def generate_report(model_dir, eval_dir, beam_size):
     header_data.append('Input Qs')
 
     header_data.append('Avg Precision')
+    header_data.append('Best Precision')
 
     for cand_num in range(beam_size):
       header_data.append('Cand%d'%cand_num)
@@ -220,6 +239,7 @@ def generate_report(model_dir, eval_dir, beam_size):
   num_parts = read_num_parts(eval_dir)
   logging.info('num_parts: %d'%num_parts)
   avg_bleu_scores = []
+  max_bleu_scores = []
   report_fw = codecs.open(os.path.join(model_dir, eval_dir, 'report_%d.txt'%(beam_size)), 'w', 'utf-8')
 
   report_fw.write('\t'.join(get_header_data()) + '\n')
@@ -238,11 +258,18 @@ def generate_report(model_dir, eval_dir, beam_size):
       #Only consider candidates upto beam_size
       candidates = eval_datum.candidates[:beam_size]
       if len(candidates) > 0:
-        avg_precision = np.average([candidate.bleu for candidate in candidates])
+        bleu_scores = [candidate.bleu for candidate in candidates]
+        avg_precision = np.average(bleu_scores)
+        max_bleu_score = np.max(bleu_scores)
+        best_rank = np.argmax(bleu_scores)
       else:
         avg_precision = 0.0
+        max_bleu_score = 0.0
+        best_rank = 0
       avg_bleu_scores.append(avg_precision)
+      max_bleu_scores.append(max_bleu_score)
 
+      report_part_data.append('%.4f [%d]'%(max_bleu_score, best_rank))
       report_part_data.append('%.4f'%avg_precision)
       for candidate in candidates:
         report_part_data.append(candidate.text)
@@ -255,8 +282,103 @@ def generate_report(model_dir, eval_dir, beam_size):
       [report_part_data.append(reference) for reference in eval_datum.references]
       report_fw.write('\t'.join(report_part_data) + '\n')
   avg_bleu_score = np.average(avg_bleu_scores)
-  return avg_bleu_score
+  best_bleu_score = np.average(max_bleu_scores)
+  return avg_bleu_score, best_bleu_score
 
+
+def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
+  def read_models():
+    models_path = {}
+    for line in codecs.open(models_file, 'r', 'utf-8'):
+      parts = line.split(';')
+      parts = [part.strip() for part in parts]
+      models_path[parts[0]] = parts[1]
+    return models_path
+
+  def set_label_candidates(label, eval_datum):
+    [candidate.set_label(label) for candidate in eval_datum.candidates]
+
+  def normalize_lm_score(eval_datum):
+    max_lm_score = np.argmax([candidate.lm_score] for candidate in eval_datum)
+    [candidate.set_lm_score(candidate.lm_score / max_lm_score) for candidate in eval_datum.candidates]
+
+  def normalize_seq2seq_score(eval_datum):
+    max_seq2seq_score = np.argmax([candidate.seq2seq_score] for candidate in eval_datum)
+    [candidate.set_seq2seq_score(candidate.seq2seq_score/ max_seq2seq_score) for candidate in eval_datum.candidates]
+
+  def read_all_candidates(part_num, models_path, normalize=True):
+    eval_file = PARTS_FORMAT % part
+    base_model_path = os.path.join(models_path[BASE_MODEL], eval_dir, '%s.%s'%(eval_file, SAVED_EVAL_FILE))
+    base_eval_data = pkl.load(open(base_model_path))
+    for eval_datum in base_eval_data:
+      set_label_candidates(BASE_MODEL, eval_datum)
+      if normalize:
+        normalize_lm_score(eval_datum)
+        normalize_seq2seq_score(eval_datum)
+
+    for model in models_path:
+      if model == BASE_MODEL:
+        continue
+      cl_model_path = os.path.join(models_path[model], eval_dir, '%s.%s'%(eval_file, SAVED_EVAL_FILE))
+      cl_eval_data = pkl.load(open(cl_model_path))
+      for base_eval_datum, cl_eval_datum in zip(base_eval_data, cl_eval_data):
+        set_label_candidates(BASE_MODEL, base_eval_datum)
+        if normalize:
+          normalize_lm_score(base_eval_datum)
+          normalize_seq2seq_score(base_eval_datum)
+
+        base_eval_datum.candidates.extend(cl_eval_datum.candidates)
+    return base_eval_data
+
+  def get_header_data():
+    header_data = []
+    header_data.append('Input Qs')
+    header_data.append('Max BLEU')
+
+    for ci in range(beam_size):
+      write_data.append('C%d'%ci)
+      write_data.append('label')
+      write_data.append('score')
+
+    write_data.append('References')
+
+  models_path = read_models()
+  logging.info(models_path)
+  num_parts = read_num_parts(eval_dir)
+  fw = codecs.open(report_file, 'w', 'utf-8')
+
+  fw.write('\t'.join(get_header_data())+ '\n')
+  for part in range(num_parts):
+    eval_data = read_all_candidates(part, models_path)
+    logging.info('Part: %d eval_data: %d'%(part, len(eval_data)))
+
+    for eval_datum in eval_data:
+      write_data = []
+      write_data.append(eval_datum.input_sentence)
+
+      #Set final scores based on lm_wt
+      [candidate.set_final_score(lm_wt) for candidate in eval_datum.candidates]
+      sorted_candidates = sorted(eval_datum.candidates, key = lambda t:t.final_score, reverse=True)[:beam_size]
+      bleu_scores = [candidate.bleu for candidate in sorted_candidates]
+
+      if len(bleu_scores) > 0:
+        max_index = np.argmax(bleu_scores)
+        write_data.append('%.4f [%d] %s'%(eval_datum.candidates[max_index].bleu, max_index, eval_datum.candidates[max_index].label))
+      else:
+        write_data.append('NA')
+
+      for candidate in sorted_candidates:
+        write_data.append(candidate.text)
+        write_data.append(candidate.label)
+        write_data.append(candidate.score_str)
+
+      for _ in range(len(sorted_candidates), beam_size):
+        write_data.append('')
+        write_data.append('')
+        write_data.append('')
+      [write_data.append(reference) for reference in eval_datum.references]
+
+      fw.write('\t'.join(write_data) + '\n')
 
 def main():
   args = setup_args()
@@ -267,10 +389,11 @@ def main():
   elif args.compute:
     generate_candidates_and_compute_scores(args.seq2seq_model_dir, args.eval_dir, args.eval_file)
   elif args.report:
-    avg_precision = generate_report(args.seq2seq_model_dir, args.eval_dir, args.beam_size)
-    logging.info('Model: %s Eval: %s Avg_Pr:%.4f [Beam_Size: %d]'
-                 %(args.seq2seq_model_dir, args.eval_dir, avg_precision, args.beam_size))
-
+    avg_precision, best_score = generate_report(args.seq2seq_model_dir, args.eval_dir, args.beam_size)
+    logging.info('Model: %s Eval: %s Avg_Pr:%.4f Best_Score:%.4f [Beam_Size: %d]'
+                 %(args.seq2seq_model_dir, args.eval_dir, avg_precision, best_score, args.beam_size))
+  elif args.combine:
+    combine_models(args.models_file, args.beam_size, args.lm_wt, args.eval_dir, args.report_file)
 
 if __name__ == '__main__':
   main()
