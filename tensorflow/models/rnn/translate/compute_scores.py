@@ -344,7 +344,6 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
     for eval_datum in base_eval_data:
       set_label_candidates(BASE_MODEL, eval_datum)
       if normalize:
-        normalize_lm_score(eval_datum)
         normalize_seq2seq_score(eval_datum)
 
     for model in models_path:
@@ -357,7 +356,6 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
           continue
         set_label_candidates(model, cl_eval_datum)
         if normalize:
-          normalize_lm_score(cl_eval_datum)
           normalize_seq2seq_score(cl_eval_datum)
 
         base_eval_datum.candidates.extend(cl_eval_datum.candidates)
@@ -392,6 +390,7 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
       write_data = []
       write_data.append(eval_datum.input_sentence)
 
+      normalize_lm_score(eval_datum)
       #Set final scores based on lm_wt
       [candidate.set_final_score(lm_wt) for candidate in eval_datum.candidates]
       sorted_candidates = sorted(eval_datum.candidates, key = lambda t:t.final_score, reverse=True)[:beam_size]
