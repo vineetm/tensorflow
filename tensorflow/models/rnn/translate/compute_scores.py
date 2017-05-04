@@ -21,6 +21,7 @@ NUM_PARTS_FILE = 'num_parts.txt'
 PARTS_FORMAT = 'p%d.txt'
 NOT_SET = -99.0
 
+
 def execute_shell_command(command, debug=False):
   logging.info('Executing CMD: %s' % command)
   if debug:
@@ -287,13 +288,36 @@ def generate_report(model_dir, eval_dir, beam_size):
 
 
 def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
+  def read_words_file(file_name):
+    words = set()
+    for line in codecs.open(file_name, 'r', 'utf-8'):
+      words.add(line.strip())
+    return words
+
   def read_models():
     models_path = {}
+    models_words = {}
     for line in codecs.open(models_file, 'r', 'utf-8'):
       parts = line.split(';')
       parts = [part.strip() for part in parts]
       models_path[parts[0]] = parts[1]
-    return models_path
+      if len(parts) == 3:
+        models_words[parts[0]] = read_words_file(parts[2])
+
+    base_stopw = models_words[BASE_MODEL]
+    #Remove words from clusters that are in base
+    for model in models_words:
+      if model == BASE_MODEL:
+        continue
+
+      for model in models_words:
+        if model == BASE_MODEL:
+          continue
+        models_words[model] = set([word for word in models_words[model] if word not in base_stopw])
+
+
+    return models_path, models_words
+
 
   def set_label_candidates(label, eval_datum):
     [candidate.set_label(label) for candidate in eval_datum.candidates]
@@ -306,7 +330,14 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
     max_seq2seq_score = np.max([candidate.seq2seq_score for candidate in eval_datum.candidates])
     [candidate.set_seq2seq_score(candidate.seq2seq_score/ max_seq2seq_score) for candidate in eval_datum.candidates]
 
-  def read_all_candidates(part_num, models_path, normalize=True):
+  def is_valid_input_question_for_cluster(input_qs, words):
+    input_set = set(input_qs.split())
+    common_words = input_set.intersection(words)
+    if len(common_words) > 0:
+      return True
+    return False
+
+  def read_all_candidates(part_num, models_path, models_words, normalize=True):
     eval_file = PARTS_FORMAT % part_num
     base_model_path = os.path.join(models_path[BASE_MODEL], eval_dir, '%s.%s'%(eval_file, SAVED_EVAL_FILE))
     base_eval_data = pkl.load(open(base_model_path))
@@ -322,6 +353,8 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
       cl_model_path = os.path.join(models_path[model], eval_dir, '%s.%s'%(eval_file, SAVED_EVAL_FILE))
       cl_eval_data = pkl.load(open(cl_model_path))
       for base_eval_datum, cl_eval_datum in zip(base_eval_data, cl_eval_data):
+        if (not is_valid_input_question_for_cluster(base_eval_datum.input_sentence, models_words[model])):
+          continue
         set_label_candidates(model, cl_eval_datum)
         if normalize:
           normalize_lm_score(cl_eval_datum)
@@ -335,15 +368,14 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
     header_data.append('Input Qs')
     header_data.append('Max BLEU')
 
+    header_data.append('Reference')
     for ci in range(beam_size):
       header_data.append('C%d'%ci)
-      header_data.append('label')
       header_data.append('score')
 
-    header_data.append('References')
     return header_data
 
-  models_path = read_models()
+  models_path, models_words = read_models()
   logging.info(models_path)
   num_parts = read_num_parts(eval_dir)
   logging.info('Num_parts: %d'%num_parts)
@@ -353,7 +385,7 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
   all_bleu_scores = []
   for part in range(num_parts):
     logging.info(part)
-    eval_data = read_all_candidates(part, models_path)
+    eval_data = read_all_candidates(part, models_path, models_words)
     logging.info('Part: %d eval_data: %d'%(part, len(eval_data)))
 
     for eval_datum in eval_data:
@@ -368,21 +400,16 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
       if len(bleu_scores) > 0:
         max_index = np.argmax(bleu_scores)
         all_bleu_scores.append(sorted_candidates[max_index].bleu)
-        write_data.append('%.4f [%d] %s'%(sorted_candidates[max_index].bleu, max_index, sorted_candidates[max_index].label))
+        write_data.append('%.4f [%d/%d] %s'%(sorted_candidates[max_index].bleu, max_index,
+                                             len(sorted_candidates), sorted_candidates[max_index].label))
       else:
         all_bleu_scores.append(0.0)
         write_data.append('NA')
 
+      [write_data.append(reference) for reference in eval_datum.references]
       for candidate in sorted_candidates:
         write_data.append(candidate.text)
-        write_data.append(candidate.label)
-        write_data.append(candidate.score_str())
-
-      for _ in range(len(sorted_candidates), beam_size):
-        write_data.append('')
-        write_data.append('')
-        write_data.append('')
-      [write_data.append(reference) for reference in eval_datum.references]
+        write_data.append('[%s] %s'%(candidate.label, candidate.score_str()))
 
       fw.write('\t'.join(write_data) + '\n')
   return np.average(all_bleu_scores)
