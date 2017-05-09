@@ -350,6 +350,7 @@ def combine_models(models_file, beam_size, lm_wt, eval_dir, report_file):
       if model == BASE_MODEL:
         continue
       cl_model_path = os.path.join(models_path[model], eval_dir, '%s.%s'%(eval_file, SAVED_EVAL_FILE))
+      logging.info('Loading file: %s'%cl_model_path)
       cl_eval_data = pkl.load(open(cl_model_path))
       for base_eval_datum, cl_eval_datum in zip(base_eval_data, cl_eval_data):
         if (not is_valid_input_question_for_cluster(base_eval_datum.input_sentence, models_words[model])):
